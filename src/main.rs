@@ -56,6 +56,8 @@ fn create_tray_icon() -> Result<tray_icon::Icon, Box<dyn std::error::Error>> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("RtText Desktop initializing, backend: {}", config::CONFIG.supabase_url);
+
     #[cfg(target_os = "windows")]
     if !check_single_instance() {
         eprintln!("RtText is already running in the system tray.");

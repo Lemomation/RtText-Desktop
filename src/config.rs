@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub struct Config {
     pub supabase_url: &'static str,
     pub supabase_anon_key: &'static str,
