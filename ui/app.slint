@@ -1,0 +1,681 @@
+import { Theme } from "theme.slint";
+
+export struct ConversationItem {
+    id: string,
+    title: string,
+    avatar_letter: string,
+    last_message: string,
+    timestamp: string,
+    is_bot: bool,
+    is_online: bool,
+    unread_count: int,
+}
+
+export struct MessageItem {
+    id: string,
+    content: string,
+    timestamp: string,
+    is_me: bool,
+}
+
+export component MainWindow inherits Window {
+    title: "RtText";
+    width: 420px;
+    height: 720px;
+    min-width: 360px;
+    min-height: 520px;
+    background: Theme.background;
+    default-font-size: 13px;
+
+    in-out property <string> active-tab: "chats";
+    in-out property <bool> is-in-chat: false;
+    in-out property <string> active-chat-title: "Gojo Satoru";
+    in-out property <string> active-chat-avatar: "G";
+    in-out property <string> active-chat-status: "Ready to chat • 1 bead";
+    in-out property <string> draft-text: "";
+    in-out property <string> current-username: "Lemomation";
+    in-out property <int> bead-balance: 100;
+
+    in-out property <[ConversationItem]> conversations: [
+        {
+            id: "bot-1",
+            title: "Gojo Satoru",
+            avatar_letter: "G",
+            last_message: "Let's continue our conversation!",
+            timestamp: "10:42 AM",
+            is_bot: true,
+            is_online: false,
+            unread_count: 0,
+        },
+        {
+            id: "dm-1",
+            title: "Alice",
+            avatar_letter: "A",
+            last_message: "See you on the desktop app!",
+            timestamp: "Yesterday",
+            is_bot: false,
+            is_online: true,
+            unread_count: 0,
+        },
+    ];
+
+    in-out property <[MessageItem]> messages: [
+        {
+            id: "m-1",
+            content: "Yo! What's up? Ready to build RtText on Windows with 1:1 Material 3 fidelity!",
+            timestamp: "10:40 AM",
+            is_me: false,
+        },
+        {
+            id: "m-2",
+            content: "Let's do Rust with 1:1 material 3 UI, we'll edit things as we go along!",
+            timestamp: "10:41 AM",
+            is_me: true,
+        },
+    ];
+
+    callback tab-clicked(string);
+    callback conversation-selected(string, string, string, string);
+    callback back-to-chats();
+    callback send-message(string);
+
+    VerticalLayout {
+        padding: 0px;
+        spacing: 0px;
+
+        // TOP APP BAR
+        Rectangle {
+            height: 56px;
+            background: Theme.background;
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                alignment: space-between;
+
+                if !root.is-in-chat : Text {
+                    text: root.active-tab == "chats" ? "RtText" : (root.active-tab == "discover" ? "Discover" : "Profile");
+                    color: Theme.text-primary;
+                    font-size: 19px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+
+                if root.is-in-chat : HorizontalLayout {
+                    spacing: 12px;
+                    alignment: start;
+
+                    back-touch := TouchArea {
+                        width: 36px;
+                        height: 36px;
+                        clicked => {
+                            root.is-in-chat = false;
+                            root.back-to-chats();
+                        }
+                        Rectangle {
+                            border-radius: Theme.radius-pill;
+                            background: back-touch.has-hover ? Theme.surface-high : transparent;
+                            Text {
+                                text: "←";
+                                color: Theme.text-primary;
+                                font-size: 18px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 36px;
+                        height: 36px;
+                        border-radius: Theme.radius-pill;
+                        background: Theme.surface-high;
+                        border-width: 1px;
+                        border-color: Theme.primary;
+                        Text {
+                            text: root.active-chat-avatar;
+                            color: Theme.primary;
+                            font-size: 14px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: root.active-chat-title;
+                            color: Theme.text-primary;
+                            font-size: 14px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: root.active-chat-status;
+                            color: Theme.primary;
+                            font-size: 11px;
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
+                    if !root.is-in-chat && root.active-tab == "chats" : Rectangle {
+                        width: 36px;
+                        height: 36px;
+                        border-radius: Theme.radius-pill;
+                        background: Theme.primary;
+                        Text {
+                            text: "+";
+                            color: Theme.background;
+                            font-size: 20px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        // SEPARATOR
+        Rectangle {
+            height: 1px;
+            background: Theme.border;
+        }
+
+        // MAIN BODY
+        Rectangle {
+            vertical-stretch: 1;
+            background: Theme.background;
+
+            // CHATS TAB
+            if !root.is-in-chat && root.active-tab == "chats" : Flickable {
+                VerticalLayout {
+                    alignment: start;
+                    spacing: 0px;
+
+                    for conv in root.conversations : conv-touch := TouchArea {
+                        height: 72px;
+                        clicked => {
+                            root.active-chat-title = conv.title;
+                            root.active-chat-avatar = conv.avatar-letter;
+                            root.active-chat-status = conv.is-bot ? "Ready to chat • 1 bead" : (conv.is-online ? "Online • Free DM" : "Offline");
+                            root.is-in-chat = true;
+                            root.conversation-selected(conv.id, conv.title, conv.avatar-letter, root.active-chat-status);
+                        }
+
+                        Rectangle {
+                            background: conv-touch.has-hover ? Theme.surface : transparent;
+
+                            HorizontalLayout {
+                                padding-left: 16px;
+                                padding-right: 16px;
+                                spacing: 14px;
+                                alignment: center;
+
+                                Rectangle {
+                                    width: 44px;
+                                    height: 44px;
+                                    border-radius: Theme.radius-pill;
+                                    background: Theme.surface-high;
+                                    border-width: conv.is-bot ? 1px : 0px;
+                                    border-color: Theme.primary;
+
+                                    Text {
+                                        text: conv.avatar-letter;
+                                        color: conv.is-bot ? Theme.primary : Theme.text-primary;
+                                        font-size: 16px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+
+                                    if conv.is-online : Rectangle {
+                                        width: 10px;
+                                        height: 10px;
+                                        x: 32px;
+                                        y: 32px;
+                                        border-radius: 5px;
+                                        background: Theme.primary;
+                                        border-width: 2px;
+                                        border-color: Theme.background;
+                                    }
+                                }
+
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    alignment: center;
+                                    spacing: 4px;
+
+                                    HorizontalLayout {
+                                        alignment: space-between;
+                                        Text {
+                                            text: conv.title;
+                                            color: Theme.text-primary;
+                                            font-size: 14px;
+                                            font-weight: 600;
+                                        }
+                                        Text {
+                                            text: conv.timestamp;
+                                            color: Theme.text-subtle;
+                                            font-size: 11px;
+                                        }
+                                    }
+
+                                    Text {
+                                        text: conv.last-message;
+                                        color: Theme.text-secondary;
+                                        font-size: 12px;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                y: 71px;
+                                height: 1px;
+                                background: Theme.surface-high;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // DISCOVER TAB
+            if !root.is-in-chat && root.active-tab == "discover" : VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+
+                Text {
+                    text: "Featured AI Bots";
+                    color: Theme.text-primary;
+                    font-size: 15px;
+                    font-weight: 700;
+                }
+
+                Rectangle {
+                    height: 80px;
+                    border-radius: Theme.radius-md;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.border;
+
+                    HorizontalLayout {
+                        padding: 12px;
+                        spacing: 12px;
+                        alignment: center;
+
+                        Rectangle {
+                            width: 44px;
+                            height: 44px;
+                            border-radius: Theme.radius-pill;
+                            background: Theme.surface-high;
+                            border-width: 1px;
+                            border-color: Theme.primary;
+                            Text {
+                                text: "G";
+                                color: Theme.primary;
+                                font-size: 16px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: center;
+                            spacing: 3px;
+                            Text {
+                                text: "Gojo Satoru";
+                                color: Theme.text-primary;
+                                font-size: 14px;
+                                font-weight: 600;
+                            }
+                            Text {
+                                text: "The strongest Jujutsu Sorcerer";
+                                color: Theme.text-secondary;
+                                font-size: 12px;
+                            }
+                        }
+
+                        Rectangle {
+                            width: 64px;
+                            height: 32px;
+                            border-radius: Theme.radius-pill;
+                            background: Theme.primary;
+                            Text {
+                                text: "Chat";
+                                color: Theme.background;
+                                font-size: 12px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // PROFILE TAB
+            if !root.is-in-chat && root.active-tab == "profile" : VerticalLayout {
+                padding: 16px;
+                spacing: 16px;
+
+                Rectangle {
+                    height: 80px;
+                    border-radius: Theme.radius-md;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.border;
+
+                    HorizontalLayout {
+                        padding: 14px;
+                        spacing: 14px;
+                        alignment: center;
+
+                        Rectangle {
+                            width: 50px;
+                            height: 50px;
+                            border-radius: Theme.radius-pill;
+                            background: Theme.surface-high;
+                            border-width: 1px;
+                            border-color: Theme.primary;
+                            Text {
+                                text: "L";
+                                color: Theme.primary;
+                                font-size: 18px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+                            Text {
+                                text: root.current-username;
+                                color: Theme.text-primary;
+                                font-size: 15px;
+                                font-weight: 700;
+                            }
+                            Text {
+                                text: "@lemomation";
+                                color: Theme.text-subtle;
+                                font-size: 12px;
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 64px;
+                    border-radius: Theme.radius-md;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.border;
+
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        alignment: space-between;
+
+                        HorizontalLayout {
+                            spacing: 10px;
+                            alignment: center;
+                            Text {
+                                text: "✨";
+                                font-size: 18px;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: "Bead Balance";
+                                color: Theme.text-secondary;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Text {
+                            text: "\{root.bead-balance} Beads";
+                            color: Theme.primary;
+                            font-size: 16px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Text {
+                    text: "RtText Windows Desktop v0.1.0 • Running in System Tray";
+                    color: Theme.text-subtle;
+                    font-size: 11px;
+                    horizontal-alignment: center;
+                }
+            }
+
+            // CHAT SCREEN
+            if root.is-in-chat : VerticalLayout {
+                padding: 0px;
+                spacing: 0px;
+
+                Flickable {
+                    vertical-stretch: 1;
+
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 10px;
+                        alignment: start;
+
+                        for msg in root.messages : HorizontalLayout {
+                            alignment: msg.is-me ? end : start;
+
+                            Rectangle {
+                                max-width: 300px;
+                                border-radius: Theme.radius-md;
+                                background: msg.is-me ? Theme.primary : Theme.surface;
+                                border-width: msg.is-me ? 0px : 1px;
+                                border-color: Theme.border;
+
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 4px;
+
+                                    Text {
+                                        text: msg.content;
+                                        color: msg.is-me ? Theme.background : Theme.text-primary;
+                                        font-size: 13px;
+                                        wrap: word-wrap;
+                                    }
+
+                                    Text {
+                                        text: msg.timestamp;
+                                        color: msg.is-me ? #0b0f14 : Theme.text-subtle;
+                                        font-size: 10px;
+                                        horizontal-alignment: right;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 60px;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.border;
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 8px;
+                        alignment: center;
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height: 40px;
+                            border-radius: Theme.radius-md;
+                            background: Theme.background;
+                            border-width: 1px;
+                            border-color: Theme.border;
+
+                            TextInput {
+                                x: 10px;
+                                width: parent.width - 20px;
+                                height: 40px;
+                                text <=> root.draft-text;
+                                color: Theme.text-primary;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                                accepted => {
+                                    if (root.draft-text != "") {
+                                        root.send-message(root.draft-text);
+                                        root.draft-text = "";
+                                    }
+                                }
+                            }
+                        }
+
+                        send-touch := TouchArea {
+                            width: 40px;
+                            height: 40px;
+                            clicked => {
+                                if (root.draft-text != "") {
+                                    root.send-message(root.draft-text);
+                                    root.draft-text = "";
+                                }
+                            }
+
+                            Rectangle {
+                                border-radius: Theme.radius-pill;
+                                background: send-touch.has-hover ? Theme.primary-dark : Theme.primary;
+                                Text {
+                                    text: "➤";
+                                    color: Theme.background;
+                                    font-size: 14px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // BOTTOM NAVIGATION BAR
+        if !root.is-in-chat : Rectangle {
+            height: 68px;
+            background: Theme.surface;
+
+            Rectangle {
+                y: 0px;
+                height: 1px;
+                background: Theme.border;
+            }
+
+            HorizontalLayout {
+                alignment: space-around;
+
+                nav-chats := TouchArea {
+                    width: 90px;
+                    clicked => {
+                        root.active-tab = "chats";
+                        root.tab-clicked("chats");
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        Rectangle {
+                            width: 56px;
+                            height: 28px;
+                            border-radius: Theme.radius-pill;
+                            background: root.active-tab == "chats" ? Theme.indicator : transparent;
+                            Text {
+                                text: "💬";
+                                font-size: 14px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                        Text {
+                            text: "Chats";
+                            color: root.active-tab == "chats" ? Theme.primary : Theme.text-subtle;
+                            font-size: 11px;
+                            font-weight: root.active-tab == "chats" ? 700 : 500;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+
+                nav-discover := TouchArea {
+                    width: 90px;
+                    clicked => {
+                        root.active-tab = "discover";
+                        root.tab-clicked("discover");
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        Rectangle {
+                            width: 56px;
+                            height: 28px;
+                            border-radius: Theme.radius-pill;
+                            background: root.active-tab == "discover" ? Theme.indicator : transparent;
+                            Text {
+                                text: "🧭";
+                                font-size: 14px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                        Text {
+                            text: "Discover";
+                            color: root.active-tab == "discover" ? Theme.primary : Theme.text-subtle;
+                            font-size: 11px;
+                            font-weight: root.active-tab == "discover" ? 700 : 500;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+
+                nav-profile := TouchArea {
+                    width: 90px;
+                    clicked => {
+                        root.active-tab = "profile";
+                        root.tab-clicked("profile");
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        Rectangle {
+                            width: 56px;
+                            height: 28px;
+                            border-radius: Theme.radius-pill;
+                            background: root.active-tab == "profile" ? Theme.indicator : transparent;
+                            Text {
+                                text: "👤";
+                                font-size: 14px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                        Text {
+                            text: "Profile";
+                            color: root.active-tab == "profile" ? Theme.primary : Theme.text-subtle;
+                            font-size: 11px;
+                            font-weight: root.active-tab == "profile" ? 700 : 500;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

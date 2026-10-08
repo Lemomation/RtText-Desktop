@@ -1,0 +1,29 @@
+[package]
+name = "rttext"
+version = "0.1.0"
+edition = "2021"
+authors = ["Lemomation"]
+description = "Native Windows desktop client for RtText with 1:1 Material 3 UI and ultra-low RAM usage."
+
+[dependencies]
+slint = "1.9"
+tokio = { version = "1.43", features = ["rt-multi-thread", "macros", "time", "sync"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tray-icon = "0.19"
+muda = "0.15"
+directories = "5.0"
+chrono = "0.4"
+windows-sys = { version = "0.59", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[build-dependencies]
+slint-build = "1.9"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

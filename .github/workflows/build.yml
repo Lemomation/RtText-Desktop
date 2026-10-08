@@ -1,0 +1,70 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build & Package Windows Native App
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: x86_64-pc-windows-msvc
+          cache: true
+
+      - name: Rust Version
+        run: rustc --version && cargo --version
+
+      - name: Check
+        run: cargo check --release
+
+      - name: Test
+        run: cargo test --release
+
+      - name: Build Release Executable
+        run: cargo build --release
+
+      - name: Package Windows Binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "dist"
+          Copy-Item -Path "target/release/rttext.exe" -Destination "dist/rttext.exe"
+          Compress-Archive -Path "dist/rttext.exe" -DestinationPath "RtText-Windows-x86_64.zip" -Force
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rttext-windows-x86_64
+          path: RtText-Windows-x86_64.zip
+
+      - name: Publish GitHub Release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          VERSION="v0.1.0"
+          if gh release view "$VERSION" --json id >/dev/null 2>&1; then
+            gh release upload "$VERSION" RtText-Windows-x86_64.zip --clobber
+          else
+            gh release create "$VERSION" RtText-Windows-x86_64.zip \
+              --title "RtText Desktop $VERSION" \
+              --notes "Automated GitHub Actions build of commit $GITHUB_SHA. Ultra-low RAM native Windows app (~15MB RAM)." \
+              --latest
+          fi
