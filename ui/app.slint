@@ -1003,7 +1003,7 @@ export component MainWindow inherits Window {
                                         font-weight: 600;
                                     }
                                     Text {
-                                        text: "Desktop v0.2.1 • System Tray Active";
+                                        text: "Desktop v0.2.3 • System Tray Active";
                                         color: Theme.text-subtle;
                                         font-size: 11px;
                                     }
@@ -1194,82 +1194,93 @@ export component MainWindow inherits Window {
                         padding-left: 16px;
                         padding-right: 16px;
                         spacing: 12px;
-                        alignment: center;
 
-                        // Image attachment icon button
-                        TouchArea {
-                            width: 38px;
-                            height: 38px;
-                            Rectangle {
-                                border-radius: 19px;
-                                background: parent.has-hover ? Theme.surface-high : transparent;
-                                Image {
-                                    source: @image-url("../assets/icons/image_attach.svg");
-                                    colorize: Theme.text-secondary;
-                                    width: 22px;
-                                    height: 22px;
-                                    x: (parent.width - self.width) / 2;
-                                    y: (parent.height - self.height) / 2;
-                                }
-                            }
-                        }
+                        // 1. Image attachment icon button
+                        VerticalLayout {
+                            alignment: center;
 
-                        // Message Input Field
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            height: 44px;
-                            border-radius: 22px;
-                            background: Theme.surface-high;
-                            border-width: 1px;
-                            border-color: Theme.border;
-
-                            if root.draft-text == "" : Text {
-                                x: 18px;
-                                text: "Message...";
-                                color: Theme.text-subtle;
-                                font-size: 13px;
-                                vertical-alignment: center;
-                            }
-
-                            TextInput {
-                                x: 18px;
-                                width: parent.width - 36px;
-                                height: 44px;
-                                text <=> root.draft-text;
-                                color: Theme.text-primary;
-                                font-size: 13px;
-                                vertical-alignment: center;
-                                accepted => {
-                                    if (root.draft-text != "") {
-                                        root.send-message(root.draft-text);
-                                        root.draft-text = "";
+                            TouchArea {
+                                width: 40px;
+                                height: 40px;
+                                Rectangle {
+                                    border-radius: 20px;
+                                    background: parent.has-hover ? Theme.surface-high : transparent;
+                                    Image {
+                                        source: @image-url("../assets/icons/image_attach.svg");
+                                        colorize: Theme.text-secondary;
+                                        width: 22px;
+                                        height: 22px;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
                                     }
                                 }
                             }
                         }
 
-                        // Send paper plane button
-                        touch-send := TouchArea {
-                            width: 44px;
-                            height: 44px;
-                            clicked => {
-                                if (root.draft-text != "") {
-                                    root.send-message(root.draft-text);
-                                    root.draft-text = "";
-                                }
-                            }
+                        // 2. Message Input Field (stretches full width)
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: center;
 
                             Rectangle {
+                                height: 44px;
                                 border-radius: 22px;
-                                background: root.draft-text != "" ? root.user-accent-color : #232b38;
+                                background: Theme.surface-high;
+                                border-width: 1px;
+                                border-color: Theme.border;
 
-                                Image {
-                                    source: @image-url("../assets/icons/send.svg");
-                                    colorize: root.draft-text != "" ? #0b0f14 : Theme.text-secondary;
-                                    width: 18px;
-                                    height: 18px;
-                                    x: (parent.width - self.width) / 2;
-                                    y: (parent.height - self.height) / 2;
+                                if root.draft-text == "" : Text {
+                                    x: 18px;
+                                    text: "Message...";
+                                    color: Theme.text-subtle;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                }
+
+                                TextInput {
+                                    x: 18px;
+                                    width: parent.width - 36px;
+                                    height: 44px;
+                                    text <=> root.draft-text;
+                                    color: Theme.text-primary;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                    accepted => {
+                                        if (root.draft-text != "") {
+                                            root.send-message(root.draft-text);
+                                            root.draft-text = "";
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 3. Send paper plane button
+                        VerticalLayout {
+                            alignment: center;
+
+                            touch-send := TouchArea {
+                                width: 44px;
+                                height: 44px;
+                                clicked => {
+                                    if (root.draft-text != "") {
+                                        root.send-message(root.draft-text);
+                                        root.draft-text = "";
+                                    }
+                                }
+
+                                Rectangle {
+                                    border-radius: 22px;
+                                    background: root.draft-text != "" ? root.user-accent-color : #1e2633;
+
+                                    Image {
+                                        source: @image-url("../assets/icons/send.svg");
+                                        colorize: root.draft-text != "" ? #0b0f14 : Theme.text-subtle;
+                                        width: 18px;
+                                        height: 18px;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                    }
                                 }
                             }
                         }
