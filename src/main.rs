@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-#![allow(unused_imports, dead_code)]
+#![allow(unused_imports, dead_code, unused_variables)]
 
 mod api;
 mod config;
@@ -313,7 +313,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         main_window.on_send_message(move |text| {
             println!("Send message triggered: {}", text);
 
-            let user_accent = if let Some(w) = window_for_send.upgrade() {
+            if let Some(w) = window_for_send.upgrade() {
                 let msgs_model = w.get_messages();
                 let mut msgs: Vec<MessageItem> = (0..msgs_model.row_count())
                     .filter_map(|i| msgs_model.row_data(i))
@@ -328,10 +328,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
                 let model = std::rc::Rc::new(slint::VecModel::from(msgs));
                 w.set_messages(model.into());
-                user_accent
-            } else {
-                parse_hex_color("#FBBF24")
-            };
+            }
 
             let client = client.clone();
             let window_weak = window_for_send.clone();
