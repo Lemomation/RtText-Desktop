@@ -115,7 +115,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Initialize Tokio runtime for background Supabase networking
-    let rt = Arc::new(tokio::runtime::Runtime::new()?);
+    let rt = tokio::runtime::Runtime::new()?;
+    let _rt_guard = rt.enter();
 
     // Initialize Supabase Client
     let client = Arc::new(SupabaseClient::new());
@@ -420,7 +421,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let conv_to_bot_clone = conv_to_bot.clone();
         let bot_to_conv_clone = bot_to_conv.clone();
 
-        rt.spawn(async move {
+        tokio::spawn(async move {
             println!("Authenticating with Supabase...");
             match client.login_default().await {
                 Ok(uid) => {
