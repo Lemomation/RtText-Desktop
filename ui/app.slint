@@ -444,28 +444,6 @@ export component MainWindow inherits Window {
                                     conv.is-bot,
                                     conv.bubble-color
                                 );
-
-                                // If selecting human DM, show DM messages with greyish bubbles!
-                                if !conv.is-bot && conv.id == "anika" {
-                                    root.messages = [
-                                        { id: "dm-1", content: "Hi", timestamp: "9:19 AM", is-me: true, bubble-color: root.user-accent-color },
-                                        { id: "dm-2", content: "Photo dikh rha hai?", timestamp: "9:19 AM", is-me: true, bubble-color: root.user-accent-color },
-                                        { id: "dm-3", content: "nhi", timestamp: "9:30 AM", is-me: false, bubble-color: Theme.dm-bubble },
-                                        { id: "dm-4", content: "wi", timestamp: "9:30 AM", is-me: false, bubble-color: Theme.dm-bubble },
-                                        { id: "dm-5", content: "w8", timestamp: "9:30 AM", is-me: false, bubble-color: Theme.dm-bubble },
-                                        { id: "dm-6", content: "yes", timestamp: "9:31 AM", is-me: false, bubble-color: Theme.dm-bubble },
-                                        { id: "dm-7", content: "deal", timestamp: "9:32 AM", is-me: false, bubble-color: Theme.dm-bubble },
-                                    ];
-                                } else if conv.is-bot {
-                                    root.messages = [
-                                        { id: "m-1", content: "no absolutely not", timestamp: "2:14 PM", is-me: true, bubble-color: root.user-accent-color },
-                                        { id: "m-2", content: "Good! Now stop asking dumb questions and tell me something interesting.", timestamp: "2:14 PM", is-me: false, bubble-color: conv.bubble-color },
-                                        { id: "m-3", content: "i don't think there is anything interesting in my life", timestamp: "2:15 PM", is-me: true, bubble-color: root.user-accent-color },
-                                        { id: "m-4", content: "Tch, boring. Fine, I'll go first. I bought a new skirt today and it looks amazing on me. Not that you'd appreciate it anyway.", timestamp: "2:15 PM", is-me: false, bubble-color: conv.bubble-color },
-                                        { id: "m-5", content: "I'm sure it looks good 👍", timestamp: "2:16 PM", is-me: true, bubble-color: root.user-accent-color },
-                                        { id: "m-6", content: "Obviously it does. I don't need you to tell me that.", timestamp: "2:16 PM", is-me: false, bubble-color: conv.bubble-color },
-                                    ];
-                                }
                             }
 
                             Rectangle {
@@ -689,6 +667,14 @@ export component MainWindow inherits Window {
                                 root.active-chat-is-bot = true;
                                 root.active-chat-bubble-color = bot.bubble-color;
                                 root.active-nav = "chats";
+                                root.conversation-selected(
+                                    bot.id,
+                                    bot.name,
+                                    bot.bio,
+                                    bot.avatar-letter,
+                                    true,
+                                    bot.bubble-color
+                                );
                             }
 
                             Rectangle {
@@ -1003,7 +989,7 @@ export component MainWindow inherits Window {
                                         font-weight: 600;
                                     }
                                     Text {
-                                        text: "Desktop v0.2.3 • System Tray Active";
+                                        text: "Desktop v0.3.0 • System Tray Active";
                                         color: Theme.text-subtle;
                                         font-size: 11px;
                                     }
