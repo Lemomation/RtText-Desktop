@@ -52,12 +52,6 @@ export component MainWindow inherits Window {
     background: Theme.background;
     default-font-size: 13px;
 
-    // Window close intercept: hide to tray
-    close-requested => {
-        root.hide();
-        return CloseRequestResponse.keep-window;
-    }
-
     // 1. Auth & Session State
     in-out property <bool> is-logged-in: false;
     in-out property <string> auth-mode: "login"; // "login" or "signup"

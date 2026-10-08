@@ -7,7 +7,7 @@ mod models;
 
 use api::{decode_slint_image, format_bubble_time, format_timestamp, parse_hex_color, SupabaseClient};
 use models::*;
-use slint::Model;
+use slint::{ComponentHandle, Model};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -182,15 +182,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Close button intercepts window close and hides to system tray
-    {
-        let window_weak = main_window.as_weak();
-        main_window.on_close_requested(move || {
-            if let Some(w) = window_weak.upgrade() {
-                let _ = w.hide();
-            }
-            slint::CloseRequestResponse::KeepWindow
-        });
-    }
+    main_window.window().on_close_requested(move || {
+        slint::CloseRequestResponse::HideWindow
+    });
 
     // Helper to load application data after login
     let load_app_data = {
@@ -463,29 +457,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Check saved session on launch
     if let Some(session) = load_saved_session() {
         println!("Restoring saved session for user: {}", session.user_id);
-        let uid = session.user_id.clone();
-        *my_user_id.write().await = uid.clone();
-        tokio::spawn({
-            let client = client.clone();
-            let session_clone = session.clone();
-            let load_fn = load_app_data.clone();
-            let window_weak = main_window.as_weak();
-            async move {
-                client.set_session(&session_clone).await;
-                // Verify session works
-                match client.fetch_profile(&session_clone.user_id).await {
-                    Ok(_) => {
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(w) = window_weak.upgrade() {
-                                w.set_is_logged_in(true);
-                            }
-                        });
-                        load_fn(session_clone.user_id);
-                    }
-                    Err(e) => {
-                        eprintln!("Saved session invalid or expired: {}", e);
-                        delete_session();
-                    }
+        let my_user_id = my_user_id.clone();
+        let client = client.clone();
+        let session_clone = session.clone();
+        let load_fn = load_app_data.clone();
+        let window_weak = main_window.as_weak();
+        tokio::spawn(async move {
+            *my_user_id.write().await = session_clone.user_id.clone();
+            client.set_session(&session_clone).await;
+            // Verify session works
+            match client.fetch_profile(&session_clone.user_id).await {
+                Ok(_) => {
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = window_weak.upgrade() {
+                            w.set_is_logged_in(true);
+                        }
+                    });
+                    load_fn(session_clone.user_id);
+                }
+                Err(e) => {
+                    eprintln!("Saved session invalid or expired: {}", e);
+                    delete_session();
                 }
             }
         });
@@ -1184,8 +1176,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "windows")]
     trim_working_set();
 
-    // Run main application event loop
-    main_window.run()?;
+    // Run main application event loop (persists in system tray even when window is hidden)
+    main_window.show()?;
+    slint::run_event_loop_until_quit()?;
 
     Ok(())
 }
