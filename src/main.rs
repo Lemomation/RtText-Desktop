@@ -8,15 +8,22 @@ slint::include_modules!();
 
 #[cfg(target_os = "windows")]
 fn check_single_instance() -> bool {
+    extern "system" {
+        fn CreateMutexW(
+            lp_mutex_attributes: *const std::ffi::c_void,
+            b_initial_owner: i32,
+            lp_name: *const u16,
+        ) -> *mut std::ffi::c_void;
+        fn GetLastError() -> u32;
+    }
+
+    const ERROR_ALREADY_EXISTS: u32 = 183;
+
+    let name: Vec<u16> = "Global\\RtText_Desktop_SingleInstance_Mutex\0"
+        .encode_utf16()
+        .collect();
+
     unsafe {
-        use windows_sys::Win32::Foundation::GetLastError;
-        use windows_sys::Win32::System::Threading::CreateMutexW;
-
-        const ERROR_ALREADY_EXISTS: u32 = 183;
-
-        let name: Vec<u16> = "Global\\RtText_Desktop_SingleInstance_Mutex\0"
-            .encode_utf16()
-            .collect();
         let _handle = CreateMutexW(std::ptr::null(), 1, name.as_ptr());
         if GetLastError() == ERROR_ALREADY_EXISTS {
             return false;
