@@ -116,6 +116,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Selected conversation {}: {} ({}, is_bot: {})", id, title, subtitle, is_bot);
     });
 
+    main_window.on_accent_changed(|id, _color| {
+        println!("User accent color changed to: {}", id);
+    });
+
     let window_for_send = main_window.as_weak();
     main_window.on_send_message(move |text| {
         println!("Send message triggered: {}", text);
@@ -124,12 +128,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut msgs: Vec<MessageItem> = (0..msgs_model.row_count())
                 .filter_map(|i| msgs_model.row_data(i))
                 .collect();
+            let user_accent = w.get_user_accent_color();
             msgs.push(MessageItem {
                 id: format!("m-{}", msgs.len() + 1).into(),
                 content: text,
                 timestamp: "Just now".into(),
                 is_me: true,
-                bubble_color: slint::Color::from_argb_u8(255, 251, 191, 36),
+                bubble_color: user_accent,
             });
             let model = std::rc::Rc::new(slint::VecModel::from(msgs));
             w.set_messages(model.into());

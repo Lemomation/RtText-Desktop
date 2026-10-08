@@ -59,7 +59,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          VERSION="v0.2.0"
+          VERSION="v0.2.1"
           if gh release view "$VERSION" --json id >/dev/null 2>&1; then
             gh release upload "$VERSION" RtText-Windows-x86_64.zip --clobber
           else
