@@ -5,10 +5,11 @@ mod api;
 mod config;
 mod models;
 
-use api::{format_bubble_time, parse_hex_color, SupabaseClient};
+use api::{decode_slint_image, format_bubble_time, format_timestamp, parse_hex_color, SupabaseClient};
 use models::*;
 use slint::Model;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -78,13 +79,32 @@ fn create_tray_icon() -> Result<tray_icon::Icon, Box<dyn std::error::Error>> {
     Ok(tray_icon::Icon::from_rgba(rgba, width, height)?)
 }
 
-fn get_settings_file_path() -> Option<std::path::PathBuf> {
+fn get_app_dir() -> PathBuf {
     directories::ProjectDirs::from("com", "Lemomation", "RtText")
-        .map(|dirs| dirs.config_dir().join("settings.json"))
+        .map(|dirs| dirs.config_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn load_saved_session() -> Option<SessionData> {
+    let path = get_app_dir().join("session.json");
+    let content = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+fn save_session(session: &SessionData) {
+    let dir = get_app_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(data) = serde_json::to_string(session) {
+        let _ = std::fs::write(dir.join("session.json"), data);
+    }
+}
+
+fn delete_session() {
+    let _ = std::fs::remove_file(get_app_dir().join("session.json"));
 }
 
 fn load_saved_accent() -> Option<(String, String)> {
-    let path = get_settings_file_path()?;
+    let path = get_app_dir().join("settings.json");
     let content = std::fs::read_to_string(path).ok()?;
     let val: serde_json::Value = serde_json::from_str(&content).ok()?;
     let id = val.get("accent_id")?.as_str()?.to_string();
@@ -93,16 +113,13 @@ fn load_saved_accent() -> Option<(String, String)> {
 }
 
 fn save_accent(accent_id: &str, accent_hex: &str) {
-    if let Some(path) = get_settings_file_path() {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let data = serde_json::json!({
-            "accent_id": accent_id,
-            "accent_hex": accent_hex,
-        });
-        let _ = std::fs::write(path, data.to_string());
-    }
+    let dir = get_app_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let data = serde_json::json!({
+        "accent_id": accent_id,
+        "accent_hex": accent_hex,
+    });
+    let _ = std::fs::write(dir.join("settings.json"), data.to_string());
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -130,12 +147,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let my_user_id = Arc::new(RwLock::new(String::new()));
     let conv_to_bot: Arc<RwLock<HashMap<String, Option<String>>>> = Arc::new(RwLock::new(HashMap::new()));
     let bot_to_conv: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
+    let conv_to_dm: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
+    let dm_to_conv: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
 
     // Restore saved accent if available
     if let Some((acc_id, acc_hex)) = load_saved_accent() {
         main_window.set_user_accent_id(acc_id.into());
         main_window.set_user_accent_color(parse_hex_color(&acc_hex));
     }
+
+    // Set app version property
+    main_window.set_app_version(config::CONFIG.app_version.into());
 
     // Setup System Tray Menu
     let tray_menu = muda::Menu::new();
@@ -159,58 +181,686 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    // UI Callbacks
+    // Close button intercepts window close and hides to system tray
     {
+        let window_weak = main_window.as_weak();
+        main_window.on_close_requested(move || {
+            if let Some(w) = window_weak.upgrade() {
+                let _ = w.hide();
+            }
+            slint::CloseRequestResponse::KeepWindow
+        });
+    }
+
+    // Helper to load application data after login
+    let load_app_data = {
         let client = client.clone();
         let window_weak = main_window.as_weak();
-        let my_uid_clone = my_user_id.clone();
-        main_window.on_tab_clicked(move |tab| {
-            println!("Switched to tab: {}", tab);
+        let active_id_clone = active_conv_id.clone();
+        let active_bot_clone = active_bot_id.clone();
+        let conv_to_bot_clone = conv_to_bot.clone();
+        let bot_to_conv_clone = bot_to_conv.clone();
+        let conv_to_dm_clone = conv_to_dm.clone();
+        let dm_to_conv_clone = dm_to_conv.clone();
+
+        Arc::new(move |uid: String| {
             let client = client.clone();
             let window_weak = window_weak.clone();
-            let my_uid_clone = my_uid_clone.clone();
-            let tab_str = tab.to_string();
+            let active_id = active_id_clone.clone();
+            let active_bot = active_bot_clone.clone();
+            let conv_to_bot = conv_to_bot_clone.clone();
+            let bot_to_conv = bot_to_conv_clone.clone();
+            let conv_to_dm = conv_to_dm_clone.clone();
+            let dm_to_conv = dm_to_conv_clone.clone();
 
             tokio::spawn(async move {
-                if tab_str == "profile" {
-                    let uid = my_uid_clone.read().await.clone();
-                    if !uid.is_empty() {
-                        if let Ok(profile) = client.fetch_profile(&uid).await {
+                // 1. Profile & Avatar
+                if let Ok(profile) = client.fetch_profile(&uid).await {
+                    let uname = profile.username.clone().unwrap_or_else(|| "User".into());
+                    let beads = profile.beads.unwrap_or(0);
+                    let mut avatar_img = None;
+                    if let Some(a_url) = profile.avatar_url.as_deref() {
+                        if let Some(bytes) = client.fetch_and_cache_image(a_url).await {
+                            avatar_img = decode_slint_image(&bytes);
+                        }
+                    }
+
+                    let w_clone = window_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = w_clone.upgrade() {
+                            w.set_current_username(uname.into());
+                            w.set_bead_balance(beads);
+                            if let Some(img) = avatar_img {
+                                w.set_user_has_avatar(true);
+                                w.set_user_avatar_image(img);
+                            }
+                        }
+                    });
+                }
+
+                // 2. Bots Directory
+                if let Ok(bots) = client.fetch_bots().await {
+                    let mut bot_items = Vec::new();
+                    for b in bots {
+                        let mut avatar_img = None;
+                        if let Some(pfp) = b.pfp_url.as_deref() {
+                            if let Some(bytes) = client.fetch_and_cache_image(pfp).await {
+                                avatar_img = decode_slint_image(&bytes);
+                            }
+                        }
+                        let has_avatar = avatar_img.is_some();
+                        let default_img = avatar_img.unwrap_or_default();
+
+                        bot_items.push(BotCardItem {
+                            id: b.id.into(),
+                            name: b.name.clone().into(),
+                            bio: b.bio.unwrap_or_default().into(),
+                            avatar_letter: b.name.chars().next().unwrap_or('B').to_uppercase().to_string().into(),
+                            has_avatar,
+                            avatar_image: default_img,
+                            bubble_color: parse_hex_color(&b.bubble_color.unwrap_or_else(|| "#FB7185".into())),
+                        });
+                    }
+
+                    let w_clone = window_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = w_clone.upgrade() {
+                            let model = std::rc::Rc::new(slint::VecModel::from(bot_items));
+                            w.set_bot_directory(model.into());
+                        }
+                    });
+                }
+
+                // 3. People Directory (from public.people view)
+                if let Ok(people) = client.fetch_people().await {
+                    let mut people_items = Vec::new();
+                    for p in people {
+                        if p.id == uid { continue; } // Don't list self in people
+                        let mut avatar_img = None;
+                        if let Some(a_url) = p.avatar_url.as_deref() {
+                            if let Some(bytes) = client.fetch_and_cache_image(a_url).await {
+                                avatar_img = decode_slint_image(&bytes);
+                            }
+                        }
+                        let has_avatar = avatar_img.is_some();
+                        let default_img = avatar_img.unwrap_or_default();
+
+                        let uname = p.username.unwrap_or_else(|| "User".into());
+                        let letter = uname.chars().next().unwrap_or('U').to_uppercase().to_string();
+
+                        people_items.push(PersonCardItem {
+                            id: p.id.into(),
+                            username: uname.into(),
+                            subtitle: "Joined community".into(),
+                            avatar_letter: letter.into(),
+                            has_avatar,
+                            avatar_image: default_img,
+                            is_online: false,
+                        });
+                    }
+
+                    let w_clone = window_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = w_clone.upgrade() {
+                            let model = std::rc::Rc::new(slint::VecModel::from(people_items));
+                            w.set_people_directory(model.into());
+                        }
+                    });
+                }
+
+                // 4. Conversations List
+                if let Ok(convs) = client.fetch_conversations(&uid).await {
+                    {
+                        let mut c2b = conv_to_bot.write().await;
+                        let mut b2c = bot_to_conv.write().await;
+                        let mut c2d = conv_to_dm.write().await;
+                        let mut d2c = dm_to_conv.write().await;
+                        for c in &convs {
+                            c2b.insert(c.id.clone(), c.bot_id.clone());
+                            if let Some(bid) = &c.bot_id {
+                                b2c.insert(bid.clone(), c.id.clone());
+                            }
+                            if let Some(dmid) = &c.dm_user_id {
+                                c2d.insert(c.id.clone(), dmid.clone());
+                                d2c.insert(dmid.clone(), c.id.clone());
+                            }
+                        }
+                    }
+
+                    // Select first conversation by default
+                    if let Some(first) = convs.first() {
+                        *active_id.write().await = first.id.clone();
+                        *active_bot.write().await = first.bot_id.clone();
+
+                        let title = first.title.clone();
+                        let subtitle = first.subtitle.clone();
+                        let avatar_letter = first.avatar_letter.clone();
+                        let is_bot = first.is_bot;
+                        let bubble_color = parse_hex_color(&first.bubble_color);
+                        let cid = first.id.clone();
+
+                        let mut header_avatar = None;
+                        if let Some(a_url) = first.avatar_url.as_deref() {
+                            if let Some(bytes) = client.fetch_and_cache_image(a_url).await {
+                                header_avatar = decode_slint_image(&bytes);
+                            }
+                        }
+                        let has_hdr_avatar = header_avatar.is_some();
+                        let default_hdr_img = header_avatar.unwrap_or_default();
+
+                        let w_clone = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w_clone.upgrade() {
+                                w.set_active_chat_id(cid.into());
+                                w.set_active_chat_title(title.into());
+                                w.set_active_chat_subtitle(subtitle.into());
+                                w.set_active_chat_avatar(avatar_letter.into());
+                                w.set_active_chat_has_avatar(has_hdr_avatar);
+                                w.set_active_chat_avatar_image(default_hdr_img);
+                                w.set_active_chat_is_bot(is_bot);
+                                w.set_active_chat_bubble_color(bubble_color);
+                            }
+                        });
+                    }
+
+                    // Convert and download avatars for conversation items
+                    let mut conv_items = Vec::new();
+                    for c in convs {
+                        let mut avatar_img = None;
+                        if let Some(a_url) = c.avatar_url.as_deref() {
+                            if let Some(bytes) = client.fetch_and_cache_image(a_url).await {
+                                avatar_img = decode_slint_image(&bytes);
+                            }
+                        }
+                        let has_avatar = avatar_img.is_some();
+                        let default_img = avatar_img.unwrap_or_default();
+
+                        conv_items.push(ConversationItem {
+                            id: c.id.into(),
+                            title: c.title.into(),
+                            subtitle: c.subtitle.into(),
+                            avatar_letter: c.avatar_letter.into(),
+                            has_avatar,
+                            avatar_image: default_img,
+                            last_message: c.last_message.into(),
+                            timestamp: c.timestamp.into(),
+                            is_bot: c.is_bot,
+                            is_online: c.is_online,
+                            bubble_color: parse_hex_color(&c.bubble_color),
+                        });
+                    }
+
+                    let w_clone = window_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = w_clone.upgrade() {
+                            let model = std::rc::Rc::new(slint::VecModel::from(conv_items));
+                            w.set_conversations(model.into());
+                        }
+                    });
+
+                    // 5. Load Messages for Active Conversation
+                    let cur_cid = active_id.read().await.clone();
+                    if !cur_cid.is_empty() {
+                        if let Ok(msgs) = client.fetch_messages(&cur_cid).await {
+                            let mut msg_items = Vec::new();
+                            for m in msgs {
+                                let is_me = m.role == "user"
+                                    && (m.sender_id.as_deref() == Some(&uid) || m.sender_id.is_none());
+
+                                let mut media_img = None;
+                                if let Some(murl) = m.media_url.as_deref() {
+                                    if let Some(bytes) = client.fetch_and_cache_image(murl).await {
+                                        media_img = decode_slint_image(&bytes);
+                                    }
+                                }
+                                let has_media = media_img.is_some();
+                                let default_media_img = media_img.unwrap_or_default();
+
+                                msg_items.push((m, is_me, has_media, default_media_img));
+                            }
+
+                            let w_clone = window_weak.clone();
                             let _ = slint::invoke_from_event_loop(move || {
-                                if let Some(w) = window_weak.upgrade() {
-                                    if let Some(uname) = profile.username {
-                                        w.set_current_username(uname.into());
-                                    }
-                                    if let Some(beads) = profile.beads {
-                                        w.set_bead_balance(beads);
-                                    }
+                                if let Some(w) = w_clone.upgrade() {
+                                    let user_accent = w.get_user_accent_color();
+                                    let is_bot = w.get_active_chat_is_bot();
+                                    let bot_color = w.get_active_chat_bubble_color();
+
+                                    let items: Vec<MessageItem> = msg_items
+                                        .into_iter()
+                                        .map(|(m, is_me, has_media, img)| {
+                                            let bubble = if is_me {
+                                                user_accent
+                                            } else if is_bot {
+                                                bot_color
+                                            } else {
+                                                parse_hex_color("#1E2530")
+                                            };
+
+                                            MessageItem {
+                                                id: m.id.into(),
+                                                content: m.content.unwrap_or_default().into(),
+                                                timestamp: format_bubble_time(m.created_at.as_deref().unwrap_or("")).into(),
+                                                is_me,
+                                                bubble_color: bubble,
+                                                has_media,
+                                                media_image: img,
+                                            }
+                                        })
+                                        .collect();
+
+                                    let model = std::rc::Rc::new(slint::VecModel::from(items));
+                                    w.set_messages(model.into());
                                 }
                             });
                         }
                     }
                 }
             });
+        })
+    };
+
+    // Check saved session on launch
+    if let Some(session) = load_saved_session() {
+        println!("Restoring saved session for user: {}", session.user_id);
+        let uid = session.user_id.clone();
+        *my_user_id.write().await = uid.clone();
+        tokio::spawn({
+            let client = client.clone();
+            let session_clone = session.clone();
+            let load_fn = load_app_data.clone();
+            let window_weak = main_window.as_weak();
+            async move {
+                client.set_session(&session_clone).await;
+                // Verify session works
+                match client.fetch_profile(&session_clone.user_id).await {
+                    Ok(_) => {
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = window_weak.upgrade() {
+                                w.set_is_logged_in(true);
+                            }
+                        });
+                        load_fn(session_clone.user_id);
+                    }
+                    Err(e) => {
+                        eprintln!("Saved session invalid or expired: {}", e);
+                        delete_session();
+                    }
+                }
+            }
         });
     }
 
-    // When a conversation is selected in the UI
+    // AUTH CALLBACKS
+    // 1. Login Requested
+    {
+        let client = client.clone();
+        let window_weak = main_window.as_weak();
+        let my_uid = my_user_id.clone();
+        let load_fn = load_app_data.clone();
+
+        main_window.on_login_requested(move |email, password| {
+            let email_str = email.to_string();
+            let pass_str = password.to_string();
+            let client = client.clone();
+            let window_weak = window_weak.clone();
+            let my_uid = my_uid.clone();
+            let load_fn = load_fn.clone();
+
+            if let Some(w) = window_weak.upgrade() {
+                w.set_auth_busy(true);
+                w.set_auth_error("".into());
+            }
+
+            tokio::spawn(async move {
+                match client.login(&email_str, &pass_str).await {
+                    Ok(session) => {
+                        save_session(&session);
+                        *my_uid.write().await = session.user_id.clone();
+
+                        let uid = session.user_id.clone();
+                        let w_clone = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w_clone.upgrade() {
+                                w.set_auth_busy(false);
+                                w.set_is_logged_in(true);
+                                w.set_auth_error("".into());
+                            }
+                        });
+
+                        load_fn(uid);
+                    }
+                    Err(e) => {
+                        let err_msg = e.to_string();
+                        let display_err = if err_msg.contains("Invalid login") || err_msg.contains("400") {
+                            "Invalid email or password. Please check your credentials."
+                        } else {
+                            "Login failed. Please check network and try again."
+                        };
+                        let w_clone = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w_clone.upgrade() {
+                                w.set_auth_busy(false);
+                                w.set_auth_error(display_err.into());
+                            }
+                        });
+                    }
+                }
+            });
+        });
+    }
+
+    // 2. Signup Requested
+    {
+        let client = client.clone();
+        let window_weak = main_window.as_weak();
+        let my_uid = my_user_id.clone();
+        let load_fn = load_app_data.clone();
+
+        main_window.on_signup_requested(move |email, password, username| {
+            let email_str = email.to_string();
+            let pass_str = password.to_string();
+            let uname_str = username.to_string();
+            let client = client.clone();
+            let window_weak = window_weak.clone();
+            let my_uid = my_uid.clone();
+            let load_fn = load_fn.clone();
+
+            if let Some(w) = window_weak.upgrade() {
+                w.set_auth_busy(true);
+                w.set_auth_error("".into());
+            }
+
+            tokio::spawn(async move {
+                match client.signup(&email_str, &pass_str, &uname_str).await {
+                    Ok(session) => {
+                        save_session(&session);
+                        *my_uid.write().await = session.user_id.clone();
+
+                        let uid = session.user_id.clone();
+                        let w_clone = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w_clone.upgrade() {
+                                w.set_auth_busy(false);
+                                w.set_is_logged_in(true);
+                                w.set_auth_error("".into());
+                            }
+                        });
+
+                        load_fn(uid);
+                    }
+                    Err(e) => {
+                        let err_msg = e.to_string();
+                        let display_err = if err_msg.contains("already registered") {
+                            "An account with this email already exists."
+                        } else {
+                            "Could not create account. Please check inputs."
+                        };
+                        let w_clone = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w_clone.upgrade() {
+                                w.set_auth_busy(false);
+                                w.set_auth_error(display_err.into());
+                            }
+                        });
+                    }
+                }
+            });
+        });
+    }
+
+    // 3. Logout Requested
+    {
+        let client = client.clone();
+        let window_weak = main_window.as_weak();
+        let my_uid = my_user_id.clone();
+        let active_id = active_conv_id.clone();
+
+        main_window.on_logout_requested(move || {
+            delete_session();
+            let client = client.clone();
+            let window_weak = window_weak.clone();
+            let my_uid = my_uid.clone();
+            let active_id = active_id.clone();
+
+            tokio::spawn(async move {
+                client.clear_session().await;
+                *my_uid.write().await = String::new();
+                *active_id.write().await = String::new();
+
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = window_weak.upgrade() {
+                        w.set_is_logged_in(false);
+                        w.set_conversations(std::rc::Rc::new(slint::VecModel::default()).into());
+                        w.set_messages(std::rc::Rc::new(slint::VecModel::default()).into());
+                        w.set_active_chat_title("".into());
+                        w.set_active_chat_id("".into());
+                    }
+                });
+            });
+        });
+    }
+
+    // DISCOVER CALLBACK: Person Selected (Start/Open DM)
+    {
+        let client = client.clone();
+        let window_weak = main_window.as_weak();
+        let my_uid_clone = my_user_id.clone();
+        let active_id = active_conv_id.clone();
+        let active_bot = active_bot_id.clone();
+        let dm_to_conv = dm_to_conv.clone();
+        let conv_to_dm = conv_to_dm.clone();
+
+        main_window.on_person_selected(move |person_id, person_username| {
+            let pid = person_id.to_string();
+            let uname = person_username.to_string();
+            let client = client.clone();
+            let window_weak = window_weak.clone();
+            let my_uid = my_uid_clone.clone();
+            let active_id = active_id.clone();
+            let active_bot = active_bot.clone();
+            let dm_to_conv = dm_to_conv.clone();
+            let conv_to_dm = conv_to_dm.clone();
+
+            tokio::spawn(async move {
+                let uid = my_uid.read().await.clone();
+                if uid.is_empty() { return; }
+
+                if let Ok(conv) = client.get_or_create_dm_conversation(&uid, &pid).await {
+                    let cid = conv.id.clone();
+                    *active_id.write().await = cid.clone();
+                    *active_bot.write().await = None;
+
+                    dm_to_conv.write().await.insert(pid.clone(), cid.clone());
+                    conv_to_dm.write().await.insert(cid.clone(), pid.clone());
+
+                    let w_clone = window_weak.clone();
+                    let letter = uname.chars().next().unwrap_or('U').to_uppercase().to_string();
+                    let title = uname.clone();
+
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = w_clone.upgrade() {
+                            w.set_active_chat_id(cid.into());
+                            w.set_active_chat_title(title.into());
+                            w.set_active_chat_subtitle("Direct message".into());
+                            w.set_active_chat_avatar(letter.into());
+                            w.set_active_chat_has_avatar(false);
+                            w.set_active_chat_is_bot(false);
+                            w.set_active_chat_bubble_color(parse_hex_color("#1E2530"));
+                        }
+                    });
+
+                    // Fetch messages for this DM
+                    if let Ok(msgs) = client.fetch_messages(&conv.id).await {
+                        let w_clone = window_weak.clone();
+                        let user_id_copy = uid.clone();
+
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w_clone.upgrade() {
+                                let user_accent = w.get_user_accent_color();
+                                let items: Vec<MessageItem> = msgs
+                                    .into_iter()
+                                    .map(|m| {
+                                        let is_me = m.role == "user"
+                                            && (m.sender_id.as_deref() == Some(&user_id_copy) || m.sender_id.is_none());
+                                        let bubble = if is_me { user_accent } else { parse_hex_color("#1E2530") };
+
+                                        MessageItem {
+                                            id: m.id.into(),
+                                            content: m.content.unwrap_or_default().into(),
+                                            timestamp: format_bubble_time(m.created_at.as_deref().unwrap_or("")).into(),
+                                            is_me,
+                                            bubble_color: bubble,
+                                            has_media: false,
+                                            media_image: slint::Image::default(),
+                                        }
+                                    })
+                                    .collect();
+
+                                let model = std::rc::Rc::new(slint::VecModel::from(items));
+                                w.set_messages(model.into());
+                            }
+                        });
+                    }
+                }
+            });
+        });
+    }
+
+    // UPDATE CHECKER CALLBACKS
+    {
+        let client = client.clone();
+        let window_weak = main_window.as_weak();
+
+        main_window.on_check_updates_requested(move || {
+            let client = client.clone();
+            let window_weak = window_weak.clone();
+
+            if let Some(w) = window_weak.upgrade() {
+                w.set_update_status("checking".into());
+            }
+
+            tokio::spawn(async move {
+                match client.check_latest_github_release().await {
+                    Ok(rel) => {
+                        let latest_tag = rel.tag_name;
+                        let cur_ver = config::CONFIG.app_version;
+
+                        let w_clone = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w_clone.upgrade() {
+                                if latest_tag == cur_ver {
+                                    w.set_update_status("up-to-date".into());
+                                } else {
+                                    w.set_update_status("available".into());
+                                    w.set_latest_version_tag(latest_tag.into());
+                                }
+                            }
+                        });
+                    }
+                    Err(_) => {
+                        let w_clone = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w_clone.upgrade() {
+                                w.set_update_status("up-to-date".into());
+                            }
+                        });
+                    }
+                }
+            });
+        });
+
+        main_window.on_perform_update_requested(|| {
+            // Open GitHub releases download page in user's browser
+            let url = format!("https://github.com/{}/releases/latest", config::CONFIG.github_repo);
+            let _ = std::process::Command::new("cmd")
+                .args(["/c", "start", &url])
+                .spawn();
+        });
+    }
+
+    // ATTACH IMAGE CALLBACK (Native Windows File Picker)
+    {
+        let client = client.clone();
+        let window_weak = main_window.as_weak();
+        let active_id = active_conv_id.clone();
+        let my_uid = my_user_id.clone();
+
+        main_window.on_attach_image_clicked(move || {
+            let client = client.clone();
+            let window_weak = window_weak.clone();
+            let active_id = active_id.clone();
+            let my_uid = my_uid.clone();
+
+            // Native Windows File Dialog
+            let file_opt = rfd::FileDialog::new()
+                .add_filter("Image", &["png", "jpg", "jpeg", "webp"])
+                .set_title("Select Image to Send")
+                .pick_file();
+
+            if let Some(file_path) = file_opt {
+                tokio::spawn(async move {
+                    let cid = active_id.read().await.clone();
+                    let uid = my_uid.read().await.clone();
+                    if cid.is_empty() { return; }
+
+                    if let Ok(bytes) = std::fs::read(&file_path) {
+                        let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
+
+                        // Optimistically render in UI
+                        if let Some(slint_img) = decode_slint_image(&bytes) {
+                            let img_copy = slint_img.clone();
+                            let w_clone = window_weak.clone();
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(w) = w_clone.upgrade() {
+                                    let msgs_model = w.get_messages();
+                                    let mut msgs: Vec<MessageItem> = (0..msgs_model.row_count())
+                                        .filter_map(|i| msgs_model.row_data(i))
+                                        .collect();
+                                    let user_accent = w.get_user_accent_color();
+
+                                    msgs.push(MessageItem {
+                                        id: format!("temp-media-{}", msgs.len() + 1).into(),
+                                        content: "".into(),
+                                        timestamp: "Just now".into(),
+                                        is_me: true,
+                                        bubble_color: user_accent,
+                                        has_media: true,
+                                        media_image: img_copy,
+                                    });
+
+                                    let model = std::rc::Rc::new(slint::VecModel::from(msgs));
+                                    w.set_messages(model.into());
+                                }
+                            });
+                        }
+
+                        // Upload to Supabase Storage and insert message
+                        if let Ok(public_url) = client.upload_chat_image(&cid, bytes, ext).await {
+                            let _ = client.send_message(&cid, "", Some(&uid), Some(&public_url)).await;
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    // CONVERSATION SELECTED CALLBACK
     {
         let client = client.clone();
         let window_weak = main_window.as_weak();
         let active_id = active_conv_id.clone();
         let active_bot = active_bot_id.clone();
-        let my_uid_clone = my_user_id.clone();
+        let my_uid = my_user_id.clone();
         let conv_to_bot = conv_to_bot.clone();
         let bot_to_conv = bot_to_conv.clone();
 
         main_window.on_conversation_selected(move |id, title, subtitle, _avatar, is_bot, color| {
-            println!("Selected conversation {}: {} ({}, is_bot: {})", id, title, subtitle, is_bot);
-
             let client = client.clone();
             let window_weak = window_weak.clone();
             let active_id = active_id.clone();
             let active_bot = active_bot.clone();
-            let my_uid_clone = my_uid_clone.clone();
+            let my_uid = my_uid.clone();
             let conv_to_bot = conv_to_bot.clone();
             let bot_to_conv = bot_to_conv.clone();
             let sel_id = id.to_string();
@@ -218,12 +868,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let is_bot_chat = is_bot;
 
             tokio::spawn(async move {
-                let uid = my_uid_clone.read().await.clone();
-                if uid.is_empty() {
-                    return;
-                }
+                let uid = my_uid.read().await.clone();
+                if uid.is_empty() { return; }
 
-                // Determine if sel_id is a conversation_id or a bot_id
                 let (cid, bid) = if is_bot_chat {
                     let b_map = bot_to_conv.read().await;
                     if let Some(existing_cid) = b_map.get(&sel_id) {
@@ -252,14 +899,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 *active_bot.write().await = bid;
 
                 if let Ok(msgs) = client.fetch_messages(&cid).await {
+                    let mut msg_items = Vec::new();
+                    for m in msgs {
+                        let is_me = m.role == "user"
+                            && (m.sender_id.as_deref() == Some(&uid) || m.sender_id.is_none());
+
+                        let mut media_img = None;
+                        if let Some(murl) = m.media_url.as_deref() {
+                            if let Some(bytes) = client.fetch_and_cache_image(murl).await {
+                                media_img = decode_slint_image(&bytes);
+                            }
+                        }
+                        let has_media = media_img.is_some();
+                        let default_media_img = media_img.unwrap_or_default();
+
+                        msg_items.push((m, is_me, has_media, default_media_img));
+                    }
+
+                    let w_clone = window_weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(w) = window_weak.upgrade() {
+                        if let Some(w) = w_clone.upgrade() {
                             let user_accent = w.get_user_accent_color();
-                            let items: Vec<MessageItem> = msgs
+
+                            let items: Vec<MessageItem> = msg_items
                                 .into_iter()
-                                .map(|m| {
-                                    let is_me = m.role == "user"
-                                        && (m.sender_id.as_deref() == Some(&uid) || m.sender_id.is_none());
+                                .map(|(m, is_me, has_media, img)| {
                                     let bubble = if is_me {
                                         user_accent
                                     } else if is_bot_chat {
@@ -271,12 +935,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     MessageItem {
                                         id: m.id.into(),
                                         content: m.content.unwrap_or_default().into(),
-                                        timestamp: format_bubble_time(
-                                            m.created_at.as_deref().unwrap_or(""),
-                                        )
-                                        .into(),
+                                        timestamp: format_bubble_time(m.created_at.as_deref().unwrap_or("")).into(),
                                         is_me,
                                         bubble_color: bubble,
+                                        has_media,
+                                        media_image: img,
                                     }
                                 })
                                 .collect();
@@ -290,30 +953,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // Accent changed handler: persists choice to settings
-    main_window.on_accent_changed(|id, _color| {
-        println!("User accent color changed to: {}", id);
-        let hex = match id.as_str() {
-            "teal" => "#2DD4BF",
-            "violet" => "#A78BFA",
-            "rose" => "#FB7185",
-            "blue" => "#60A5FA",
-            _ => "#FBBF24",
-        };
-        save_accent(id.as_str(), hex);
-    });
-
-    // Send Message Handler
+    // SEND MESSAGE CALLBACK
     {
         let client = client.clone();
         let window_for_send = main_window.as_weak();
         let active_id = active_conv_id.clone();
         let active_bot = active_bot_id.clone();
-        let my_uid_clone = my_user_id.clone();
+        let my_uid = my_user_id.clone();
 
         main_window.on_send_message(move |text| {
-            println!("Send message triggered: {}", text);
-
             if let Some(w) = window_for_send.upgrade() {
                 let msgs_model = w.get_messages();
                 let mut msgs: Vec<MessageItem> = (0..msgs_model.row_count())
@@ -326,6 +974,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     timestamp: "Just now".into(),
                     is_me: true,
                     bubble_color: user_accent,
+                    has_media: false,
+                    media_image: slint::Image::default(),
                 });
                 let model = std::rc::Rc::new(slint::VecModel::from(msgs));
                 w.set_messages(model.into());
@@ -335,22 +985,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let window_weak = window_for_send.clone();
             let active_id = active_id.clone();
             let active_bot = active_bot.clone();
-            let my_uid_clone = my_uid_clone.clone();
+            let my_uid = my_uid.clone();
             let text_content = text.to_string();
 
             tokio::spawn(async move {
                 let cid = active_id.read().await.clone();
                 let bid = active_bot.read().await.clone();
-                let uid = my_uid_clone.read().await.clone();
+                let uid = my_uid.read().await.clone();
 
-                if cid.is_empty() {
-                    return;
-                }
+                if cid.is_empty() { return; }
 
-                // 1. Post to Supabase messages
-                let _ = client.send_message(&cid, &text_content, Some(&uid)).await;
+                // Post message
+                let _ = client.send_message(&cid, &text_content, Some(&uid), None).await;
 
-                // 2. If talking to a bot, trigger AI reply edge function
+                // If bot, trigger AI reply
                 if bid.is_some() {
                     match client.trigger_ai_reply(&cid, bid.as_deref()).await {
                         Ok(reply) => {
@@ -368,6 +1016,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             timestamp: "Just now".into(),
                                             is_me: false,
                                             bubble_color: bot_bubble,
+                                            has_media: false,
+                                            media_image: slint::Image::default(),
                                         });
                                         let model = std::rc::Rc::new(slint::VecModel::from(msgs));
                                         w.set_messages(model.into());
@@ -380,7 +1030,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         Err(e) => {
-                            eprintln!("AI reply error: {}", e);
                             let err_msg = e.to_string();
                             let display_msg = if err_msg.contains("out_of_beads") || err_msg.contains("402") {
                                 "You are out of beads! Please claim your daily beads in Profile."
@@ -399,6 +1048,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         timestamp: "Just now".into(),
                                         is_me: false,
                                         bubble_color: parse_hex_color("#EF4444"),
+                                        has_media: false,
+                                        media_image: slint::Image::default(),
                                     });
                                     let model = std::rc::Rc::new(slint::VecModel::from(msgs));
                                     w.set_messages(model.into());
@@ -411,188 +1062,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // INITIAL DATA LOADING TASK
-    {
-        let client = client.clone();
-        let window_weak = main_window.as_weak();
-        let my_uid_clone = my_user_id.clone();
-        let active_id_clone = active_conv_id.clone();
-        let active_bot_clone = active_bot_id.clone();
-        let conv_to_bot_clone = conv_to_bot.clone();
-        let bot_to_conv_clone = bot_to_conv.clone();
-
-        tokio::spawn(async move {
-            println!("Authenticating with Supabase...");
-            match client.login_default().await {
-                Ok(uid) => {
-                    *my_uid_clone.write().await = uid.clone();
-
-                    // 1. Load Profile
-                    if let Ok(profile) = client.fetch_profile(&uid).await {
-                        let w_clone = window_weak.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(w) = w_clone.upgrade() {
-                                if let Some(uname) = profile.username {
-                                    w.set_current_username(uname.into());
-                                }
-                                if let Some(beads) = profile.beads {
-                                    w.set_bead_balance(beads);
-                                }
-                            }
-                        });
-                    }
-
-                    // 2. Load Bots Directory
-                    if let Ok(bots) = client.fetch_bots().await {
-                        let w_clone = window_weak.clone();
-                        let bot_items: Vec<BotCardItem> = bots
-                            .into_iter()
-                            .map(|b| BotCardItem {
-                                id: b.id.into(),
-                                name: b.name.clone().into(),
-                                bio: b.bio.unwrap_or_default().into(),
-                                avatar_letter: b
-                                    .name
-                                    .chars()
-                                    .next()
-                                    .unwrap_or('B')
-                                    .to_uppercase()
-                                    .to_string()
-                                    .into(),
-                                bubble_color: parse_hex_color(
-                                    &b.bubble_color.unwrap_or_else(|| "#FB7185".into()),
-                                ),
-                            })
-                            .collect();
-
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(w) = w_clone.upgrade() {
-                                let model = std::rc::Rc::new(slint::VecModel::from(bot_items));
-                                w.set_bot_directory(model.into());
-                            }
-                        });
-                    }
-
-                    // 3. Load Conversations
-                    if let Ok(convs) = client.fetch_conversations(&uid).await {
-                        {
-                            let mut c2b = conv_to_bot_clone.write().await;
-                            let mut b2c = bot_to_conv_clone.write().await;
-                            for c in &convs {
-                                c2b.insert(c.id.clone(), c.bot_id.clone());
-                                if let Some(bid) = &c.bot_id {
-                                    b2c.insert(bid.clone(), c.id.clone());
-                                }
-                            }
-                        }
-
-                        // Select first conversation by default (or keep Nobara if present)
-                        let selected_conv = convs
-                            .iter()
-                            .find(|c| c.title == "Nobara Kugisaki")
-                            .or_else(|| convs.first());
-
-                        if let Some(sel) = selected_conv {
-                            *active_id_clone.write().await = sel.id.clone();
-                            *active_bot_clone.write().await = sel.bot_id.clone();
-
-                            let title = sel.title.clone();
-                            let subtitle = sel.subtitle.clone();
-                            let avatar = sel.avatar_letter.clone();
-                            let is_bot = sel.is_bot;
-                            let b_color = parse_hex_color(&sel.bubble_color);
-                            let cid = sel.id.clone();
-
-                            let w_clone = window_weak.clone();
-                            let _ = slint::invoke_from_event_loop(move || {
-                                if let Some(w) = w_clone.upgrade() {
-                                    w.set_active_chat_id(cid.into());
-                                    w.set_active_chat_title(title.into());
-                                    w.set_active_chat_subtitle(subtitle.into());
-                                    w.set_active_chat_avatar(avatar.into());
-                                    w.set_active_chat_is_bot(is_bot);
-                                    w.set_active_chat_bubble_color(b_color);
-                                }
-                            });
-                        }
-
-                        let w_clone = window_weak.clone();
-                        let conv_items: Vec<ConversationItem> = convs
-                            .iter()
-                            .map(|c| ConversationItem {
-                                id: c.id.clone().into(),
-                                title: c.title.clone().into(),
-                                subtitle: c.subtitle.clone().into(),
-                                avatar_letter: c.avatar_letter.clone().into(),
-                                last_message: c.last_message.clone().into(),
-                                timestamp: c.timestamp.clone().into(),
-                                is_bot: c.is_bot,
-                                is_online: c.is_online,
-                                bubble_color: parse_hex_color(&c.bubble_color),
-                            })
-                            .collect();
-
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(w) = w_clone.upgrade() {
-                                let model = std::rc::Rc::new(slint::VecModel::from(conv_items));
-                                w.set_conversations(model.into());
-                            }
-                        });
-
-                        // 4. Load messages for active conversation
-                        let active_cid = active_id_clone.read().await.clone();
-                        if !active_cid.is_empty() {
-                            if let Ok(msgs) = client.fetch_messages(&active_cid).await {
-                                let w_clone = window_weak.clone();
-                                let user_id_copy = uid.clone();
-
-                                let _ = slint::invoke_from_event_loop(move || {
-                                    if let Some(w) = w_clone.upgrade() {
-                                        let user_accent = w.get_user_accent_color();
-                                        let is_bot = w.get_active_chat_is_bot();
-                                        let bot_color = w.get_active_chat_bubble_color();
-
-                                        let items: Vec<MessageItem> = msgs
-                                            .into_iter()
-                                            .map(|m| {
-                                                let is_me = m.role == "user"
-                                                    && (m.sender_id.as_deref() == Some(&user_id_copy)
-                                                        || m.sender_id.is_none());
-                                                let bubble = if is_me {
-                                                    user_accent
-                                                } else if is_bot {
-                                                    bot_color
-                                                } else {
-                                                    parse_hex_color("#1E2530")
-                                                };
-
-                                                MessageItem {
-                                                    id: m.id.into(),
-                                                    content: m.content.unwrap_or_default().into(),
-                                                    timestamp: format_bubble_time(
-                                                        m.created_at.as_deref().unwrap_or(""),
-                                                    )
-                                                    .into(),
-                                                    is_me,
-                                                    bubble_color: bubble,
-                                                }
-                                            })
-                                            .collect();
-
-                                        let model = std::rc::Rc::new(slint::VecModel::from(items));
-                                        w.set_messages(model.into());
-                                    }
-                                });
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Failed to authenticate with Supabase: {}", e);
-                }
-            }
-        });
-    }
+    // ACCENT CHANGED CALLBACK
+    main_window.on_accent_changed(|id, _color| {
+        let hex = match id.as_str() {
+            "teal" => "#2DD4BF",
+            "violet" => "#A78BFA",
+            "rose" => "#FB7185",
+            "blue" => "#60A5FA",
+            _ => "#FBBF24",
+        };
+        save_accent(id.as_str(), hex);
+    });
 
     // Background Tray & Menu Event Polling Timer + Working Set Trimmer + Realtime Sync
     let timer = slint::Timer::default();
@@ -608,13 +1088,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         move || {
             poll_count = poll_count.wrapping_add(1);
 
-            // Periodically flush unneeded heap/pages to maintain ultra-low RAM
+            // Flush unneeded memory every ~4.5 seconds
             #[cfg(target_os = "windows")]
             if poll_count % 30 == 0 {
                 trim_working_set();
             }
 
-            // Periodic sync check every ~3 seconds
+            // Periodic message sync every ~3 seconds
             if poll_count % 20 == 0 {
                 let client = sync_client.clone();
                 let active_id = sync_active_id.clone();
@@ -658,6 +1138,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                     .into(),
                                                     is_me,
                                                     bubble_color: bubble,
+                                                    has_media: false,
+                                                    media_image: slint::Image::default(),
                                                 }
                                             })
                                             .collect();
@@ -672,7 +1154,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
             }
 
-            // Process menu events
+            // Process system tray menu events
             if let Ok(event) = muda::MenuEvent::receiver().try_recv() {
                 if event.id == open_menu_id {
                     if let Some(w) = window_for_tray.upgrade() {
@@ -683,7 +1165,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            // Process tray click events (left click opens app)
+            // Process system tray icon clicks (left-click restores window)
             if let Ok(tray_event) = tray_icon::TrayIconEvent::receiver().try_recv() {
                 if let tray_icon::TrayIconEvent::Click {
                     button: tray_icon::MouseButton::Left,

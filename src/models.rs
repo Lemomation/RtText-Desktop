@@ -18,12 +18,29 @@ pub struct AuthUser {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SessionData {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub user_id: String,
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DbProfile {
     pub id: String,
     pub username: Option<String>,
     pub avatar_url: Option<String>,
     pub beads: Option<i32>,
     pub last_daily_claim: Option<String>,
+    pub last_seen_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DbPerson {
+    pub id: String,
+    pub username: Option<String>,
+    pub avatar_url: Option<String>,
+    pub created_at: Option<String>,
     pub last_seen_at: Option<String>,
 }
 
@@ -75,10 +92,26 @@ pub struct EnrichedConversation {
     pub title: String,
     pub subtitle: String,
     pub avatar_letter: String,
+    pub avatar_url: Option<String>,
     pub last_message: String,
     pub timestamp: String,
     pub is_bot: bool,
     pub is_online: bool,
     pub bubble_color: String,
     pub bot_id: Option<String>,
+    pub dm_user_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct GithubReleaseAsset {
+    pub name: String,
+    pub browser_download_url: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct GithubRelease {
+    pub tag_name: String,
+    pub name: Option<String>,
+    pub body: Option<String>,
+    pub assets: Vec<GithubReleaseAsset>,
 }
