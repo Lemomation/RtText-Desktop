@@ -5,7 +5,7 @@ mod api;
 mod config;
 mod models;
 
-use api::{decode_slint_image, format_bubble_time, format_timestamp, parse_hex_color, SupabaseClient};
+use api::{decode_image_rgba, decode_slint_image, format_bubble_time, format_timestamp, parse_hex_color, SupabaseClient};
 use models::*;
 use slint::{ComponentHandle, Model};
 use std::collections::HashMap;
@@ -215,7 +215,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut avatar_img = None;
                     if let Some(a_url) = profile.avatar_url.as_deref() {
                         if let Some(bytes) = client.fetch_and_cache_image(a_url).await {
-                            avatar_img = decode_slint_image(&bytes);
+                            avatar_img = decode_image_rgba(&bytes);
                         }
                     }
 
@@ -224,9 +224,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if let Some(w) = w_clone.upgrade() {
                             w.set_current_username(uname.into());
                             w.set_bead_balance(beads);
-                            if let Some(img) = avatar_img {
+                            if let Some(ref d) = avatar_img {
                                 w.set_user_has_avatar(true);
-                                w.set_user_avatar_image(img);
+                                w.set_user_avatar_image(d.to_slint_image());
                             }
                         }
                     });
@@ -239,27 +239,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let mut avatar_img = None;
                         if let Some(pfp) = b.pfp_url.as_deref() {
                             if let Some(bytes) = client.fetch_and_cache_image(pfp).await {
-                                avatar_img = decode_slint_image(&bytes);
+                                avatar_img = decode_image_rgba(&bytes);
                             }
                         }
-                        let has_avatar = avatar_img.is_some();
-                        let default_img = avatar_img.unwrap_or_default();
 
-                        bot_items.push(BotCardItem {
-                            id: b.id.into(),
-                            name: b.name.clone().into(),
-                            bio: b.bio.unwrap_or_default().into(),
-                            avatar_letter: b.name.chars().next().unwrap_or('B').to_uppercase().to_string().into(),
-                            has_avatar,
-                            avatar_image: default_img,
-                            bubble_color: parse_hex_color(&b.bubble_color.unwrap_or_else(|| "#FB7185".into())),
+                        bot_items.push(RawBotCard {
+                            id: b.id,
+                            name: b.name.clone(),
+                            bio: b.bio.unwrap_or_default(),
+                            avatar_letter: b.name.chars().next().unwrap_or('B').to_uppercase().to_string(),
+                            avatar_img,
+                            bubble_color: b.bubble_color.unwrap_or_else(|| "#FB7185".into()),
                         });
                     }
 
                     let w_clone = window_weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = w_clone.upgrade() {
-                            let model = std::rc::Rc::new(slint::VecModel::from(bot_items));
+                            let items: Vec<BotCardItem> = bot_items
+                                .into_iter()
+                                .map(|b| {
+                                    let has_avatar = b.avatar_img.is_some();
+                                    let img = b.avatar_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+                                    BotCardItem {
+                                        id: b.id.into(),
+                                        name: b.name.into(),
+                                        bio: b.bio.into(),
+                                        avatar_letter: b.avatar_letter.into(),
+                                        has_avatar,
+                                        avatar_image: img,
+                                        bubble_color: parse_hex_color(&b.bubble_color),
+                                    }
+                                })
+                                .collect();
+                            let model = std::rc::Rc::new(slint::VecModel::from(items));
                             w.set_bot_directory(model.into());
                         }
                     });
@@ -273,30 +286,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let mut avatar_img = None;
                         if let Some(a_url) = p.avatar_url.as_deref() {
                             if let Some(bytes) = client.fetch_and_cache_image(a_url).await {
-                                avatar_img = decode_slint_image(&bytes);
+                                avatar_img = decode_image_rgba(&bytes);
                             }
                         }
-                        let has_avatar = avatar_img.is_some();
-                        let default_img = avatar_img.unwrap_or_default();
 
                         let uname = p.username.unwrap_or_else(|| "User".into());
                         let letter = uname.chars().next().unwrap_or('U').to_uppercase().to_string();
 
-                        people_items.push(PersonCardItem {
-                            id: p.id.into(),
-                            username: uname.into(),
+                        people_items.push(RawPersonCard {
+                            id: p.id,
+                            username: uname,
                             subtitle: "Joined community".into(),
-                            avatar_letter: letter.into(),
-                            has_avatar,
-                            avatar_image: default_img,
-                            is_online: false,
+                            avatar_letter: letter,
+                            avatar_img,
                         });
                     }
 
                     let w_clone = window_weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = w_clone.upgrade() {
-                            let model = std::rc::Rc::new(slint::VecModel::from(people_items));
+                            let items: Vec<PersonCardItem> = people_items
+                                .into_iter()
+                                .map(|p| {
+                                    let has_avatar = p.avatar_img.is_some();
+                                    let img = p.avatar_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+                                    PersonCardItem {
+                                        id: p.id.into(),
+                                        username: p.username.into(),
+                                        subtitle: p.subtitle.into(),
+                                        avatar_letter: p.avatar_letter.into(),
+                                        has_avatar,
+                                        avatar_image: img,
+                                        is_online: false,
+                                    }
+                                })
+                                .collect();
+                            let model = std::rc::Rc::new(slint::VecModel::from(items));
                             w.set_people_directory(model.into());
                         }
                     });
@@ -336,11 +361,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let mut header_avatar = None;
                         if let Some(a_url) = first.avatar_url.as_deref() {
                             if let Some(bytes) = client.fetch_and_cache_image(a_url).await {
-                                header_avatar = decode_slint_image(&bytes);
+                                header_avatar = decode_image_rgba(&bytes);
                             }
                         }
                         let has_hdr_avatar = header_avatar.is_some();
-                        let default_hdr_img = header_avatar.unwrap_or_default();
 
                         let w_clone = window_weak.clone();
                         let _ = slint::invoke_from_event_loop(move || {
@@ -350,7 +374,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 w.set_active_chat_subtitle(subtitle.into());
                                 w.set_active_chat_avatar(avatar_letter.into());
                                 w.set_active_chat_has_avatar(has_hdr_avatar);
-                                w.set_active_chat_avatar_image(default_hdr_img);
+                                let img = header_avatar.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+                                w.set_active_chat_avatar_image(img);
                                 w.set_active_chat_is_bot(is_bot);
                                 w.set_active_chat_bubble_color(bubble_color);
                             }
@@ -363,31 +388,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let mut avatar_img = None;
                         if let Some(a_url) = c.avatar_url.as_deref() {
                             if let Some(bytes) = client.fetch_and_cache_image(a_url).await {
-                                avatar_img = decode_slint_image(&bytes);
+                                avatar_img = decode_image_rgba(&bytes);
                             }
                         }
-                        let has_avatar = avatar_img.is_some();
-                        let default_img = avatar_img.unwrap_or_default();
 
-                        conv_items.push(ConversationItem {
-                            id: c.id.into(),
-                            title: c.title.into(),
-                            subtitle: c.subtitle.into(),
-                            avatar_letter: c.avatar_letter.into(),
-                            has_avatar,
-                            avatar_image: default_img,
-                            last_message: c.last_message.into(),
-                            timestamp: c.timestamp.into(),
+                        conv_items.push(RawConvItem {
+                            id: c.id,
+                            title: c.title,
+                            subtitle: c.subtitle,
+                            avatar_letter: c.avatar_letter,
+                            avatar_img,
+                            last_message: c.last_message,
+                            timestamp: c.timestamp,
                             is_bot: c.is_bot,
                             is_online: c.is_online,
-                            bubble_color: parse_hex_color(&c.bubble_color),
+                            bubble_color: c.bubble_color,
                         });
                     }
 
                     let w_clone = window_weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = w_clone.upgrade() {
-                            let model = std::rc::Rc::new(slint::VecModel::from(conv_items));
+                            let items: Vec<ConversationItem> = conv_items
+                                .into_iter()
+                                .map(|c| {
+                                    let has_avatar = c.avatar_img.is_some();
+                                    let img = c.avatar_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+                                    ConversationItem {
+                                        id: c.id.into(),
+                                        title: c.title.into(),
+                                        subtitle: c.subtitle.into(),
+                                        avatar_letter: c.avatar_letter.into(),
+                                        has_avatar,
+                                        avatar_image: img,
+                                        last_message: c.last_message.into(),
+                                        timestamp: c.timestamp.into(),
+                                        is_bot: c.is_bot,
+                                        is_online: c.is_online,
+                                        bubble_color: parse_hex_color(&c.bubble_color),
+                                    }
+                                })
+                                .collect();
+                            let model = std::rc::Rc::new(slint::VecModel::from(items));
                             w.set_conversations(model.into());
                         }
                     });
@@ -404,13 +446,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let mut media_img = None;
                                 if let Some(murl) = m.media_url.as_deref() {
                                     if let Some(bytes) = client.fetch_and_cache_image(murl).await {
-                                        media_img = decode_slint_image(&bytes);
+                                        media_img = decode_image_rgba(&bytes);
                                     }
                                 }
-                                let has_media = media_img.is_some();
-                                let default_media_img = media_img.unwrap_or_default();
 
-                                msg_items.push((m, is_me, has_media, default_media_img));
+                                msg_items.push(RawMsgItem {
+                                    id: m.id,
+                                    content: m.content.unwrap_or_default(),
+                                    timestamp: format_bubble_time(m.created_at.as_deref().unwrap_or("")),
+                                    is_me,
+                                    media_img,
+                                });
                             }
 
                             let w_clone = window_weak.clone();
@@ -422,8 +468,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                                     let items: Vec<MessageItem> = msg_items
                                         .into_iter()
-                                        .map(|(m, is_me, has_media, img)| {
-                                            let bubble = if is_me {
+                                        .map(|item| {
+                                            let has_media = item.media_img.is_some();
+                                            let img = item.media_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+                                            let bubble = if item.is_me {
                                                 user_accent
                                             } else if is_bot {
                                                 bot_color
@@ -432,10 +480,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             };
 
                                             MessageItem {
-                                                id: m.id.into(),
-                                                content: m.content.unwrap_or_default().into(),
-                                                timestamp: format_bubble_time(m.created_at.as_deref().unwrap_or("")).into(),
-                                                is_me,
+                                                id: item.id.into(),
+                                                content: item.content.into(),
+                                                timestamp: item.timestamp.into(),
+                                                is_me: item.is_me,
                                                 bubble_color: bubble,
                                                 has_media,
                                                 media_image: img,
@@ -800,32 +848,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
 
                         // Optimistically render in UI
-                        if let Some(slint_img) = decode_slint_image(&bytes) {
-                            let img_copy = slint_img.clone();
-                            let w_clone = window_weak.clone();
-                            let _ = slint::invoke_from_event_loop(move || {
-                                if let Some(w) = w_clone.upgrade() {
-                                    let msgs_model = w.get_messages();
-                                    let mut msgs: Vec<MessageItem> = (0..msgs_model.row_count())
-                                        .filter_map(|i| msgs_model.row_data(i))
-                                        .collect();
-                                    let user_accent = w.get_user_accent_color();
+                        let decoded_img = decode_image_rgba(&bytes);
+                        let w_clone = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w_clone.upgrade() {
+                                let msgs_model = w.get_messages();
+                                let mut msgs: Vec<MessageItem> = (0..msgs_model.row_count())
+                                    .filter_map(|i| msgs_model.row_data(i))
+                                    .collect();
+                                let user_accent = w.get_user_accent_color();
+                                let img = decoded_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
 
-                                    msgs.push(MessageItem {
-                                        id: format!("temp-media-{}", msgs.len() + 1).into(),
-                                        content: "".into(),
-                                        timestamp: "Just now".into(),
-                                        is_me: true,
-                                        bubble_color: user_accent,
-                                        has_media: true,
-                                        media_image: img_copy,
-                                    });
+                                msgs.push(MessageItem {
+                                    id: format!("temp-media-{}", msgs.len() + 1).into(),
+                                    content: "".into(),
+                                    timestamp: "Just now".into(),
+                                    is_me: true,
+                                    bubble_color: user_accent,
+                                    has_media: true,
+                                    media_image: img,
+                                });
 
-                                    let model = std::rc::Rc::new(slint::VecModel::from(msgs));
-                                    w.set_messages(model.into());
-                                }
-                            });
-                        }
+                                let model = std::rc::Rc::new(slint::VecModel::from(msgs));
+                                w.set_messages(model.into());
+                            }
+                        });
 
                         // Upload to Supabase Storage and insert message
                         if let Ok(public_url) = client.upload_chat_image(&cid, bytes, ext).await {
@@ -899,13 +946,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let mut media_img = None;
                         if let Some(murl) = m.media_url.as_deref() {
                             if let Some(bytes) = client.fetch_and_cache_image(murl).await {
-                                media_img = decode_slint_image(&bytes);
+                                media_img = decode_image_rgba(&bytes);
                             }
                         }
-                        let has_media = media_img.is_some();
-                        let default_media_img = media_img.unwrap_or_default();
 
-                        msg_items.push((m, is_me, has_media, default_media_img));
+                        msg_items.push(RawMsgItem {
+                            id: m.id,
+                            content: m.content.unwrap_or_default(),
+                            timestamp: format_bubble_time(m.created_at.as_deref().unwrap_or("")),
+                            is_me,
+                            media_img,
+                        });
                     }
 
                     let w_clone = window_weak.clone();
@@ -915,20 +966,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             let items: Vec<MessageItem> = msg_items
                                 .into_iter()
-                                .map(|(m, is_me, has_media, img)| {
-                                    let bubble = if is_me {
+                                .map(|item| {
+                                    let bubble = if item.is_me {
                                         user_accent
                                     } else if is_bot_chat {
                                         bot_bubble_color
                                     } else {
                                         parse_hex_color("#1E2530")
                                     };
+                                    let has_media = item.media_img.is_some();
+                                    let img = item.media_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
 
                                     MessageItem {
-                                        id: m.id.into(),
-                                        content: m.content.unwrap_or_default().into(),
-                                        timestamp: format_bubble_time(m.created_at.as_deref().unwrap_or("")).into(),
-                                        is_me,
+                                        id: item.id.into(),
+                                        content: item.content.into(),
+                                        timestamp: item.timestamp.into(),
+                                        is_me: item.is_me,
                                         bubble_color: bubble,
                                         has_media,
                                         media_image: img,

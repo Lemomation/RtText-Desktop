@@ -624,6 +624,16 @@ pub fn decode_slint_image(bytes: &[u8]) -> Option<slint::Image> {
     Some(slint::Image::from_rgba8(buffer))
 }
 
+pub fn decode_image_rgba(bytes: &[u8]) -> Option<DecodedImage> {
+    let dyn_img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let (width, height) = dyn_img.dimensions();
+    Some(DecodedImage {
+        width,
+        height,
+        rgba: dyn_img.into_raw(),
+    })
+}
+
 fn rand_u128() -> u128 {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

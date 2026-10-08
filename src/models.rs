@@ -115,3 +115,61 @@ pub struct GithubRelease {
     pub body: Option<String>,
     pub assets: Vec<GithubReleaseAsset>,
 }
+
+#[derive(Clone, Debug)]
+pub struct DecodedImage {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+impl DecodedImage {
+    pub fn to_slint_image(&self) -> slint::Image {
+        let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(self.width, self.height);
+        buffer.make_mut_bytes().copy_from_slice(&self.rgba);
+        slint::Image::from_rgba8(buffer)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RawBotCard {
+    pub id: String,
+    pub name: String,
+    pub bio: String,
+    pub avatar_letter: String,
+    pub avatar_img: Option<DecodedImage>,
+    pub bubble_color: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct RawPersonCard {
+    pub id: String,
+    pub username: String,
+    pub subtitle: String,
+    pub avatar_letter: String,
+    pub avatar_img: Option<DecodedImage>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RawConvItem {
+    pub id: String,
+    pub title: String,
+    pub subtitle: String,
+    pub avatar_letter: String,
+    pub avatar_img: Option<DecodedImage>,
+    pub last_message: String,
+    pub timestamp: String,
+    pub is_bot: bool,
+    pub is_online: bool,
+    pub bubble_color: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct RawMsgItem {
+    pub id: String,
+    pub content: String,
+    pub timestamp: String,
+    pub is_me: bool,
+    pub media_img: Option<DecodedImage>,
+}
+
