@@ -283,109 +283,127 @@ export component MainWindow inherits Window {
 
                 // 2. NAVIGATION BAR (Chats | Discover | Profile)
                 Rectangle {
-                    height: 50px;
-                    background: Theme.surface;
+                    height: 52px;
+                    background: Theme.background;
 
-                    HorizontalLayout {
-                        padding-left: 10px;
-                        padding-right: 10px;
-                        spacing: 8px;
-                        alignment: space-around;
+                    Rectangle {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        height: 40px;
+                        y: 6px;
+                        border-radius: 20px;
+                        background: Theme.surface;
+                        border-width: 1px;
+                        border-color: Theme.border;
 
-                        // TAB 1: CHATS
-                        TouchArea {
-                            clicked => {
-                                root.active-nav = "chats";
-                                root.tab-clicked("chats");
-                            }
-                            Rectangle {
-                                border-radius: Theme.radius-pill;
-                                background: root.active-nav == "chats" ? #3d2c10 : transparent;
+                        HorizontalLayout {
+                            padding: 3px;
+                            spacing: 3px;
 
-                                HorizontalLayout {
-                                    alignment: center;
-                                    spacing: 8px;
+                            // TAB 1: CHATS
+                            TouchArea {
+                                horizontal-stretch: 1;
+                                clicked => {
+                                    root.active-nav = "chats";
+                                    root.tab-clicked("chats");
+                                }
+                                Rectangle {
+                                    border-radius: 17px;
+                                    background: root.active-nav == "chats" ? #332610 : (parent.has-hover ? #1a222e : transparent);
+                                    border-width: root.active-nav == "chats" ? 1px : 0px;
+                                    border-color: root.user-accent-color;
 
-                                    Image {
-                                        source: @image-url("../assets/icons/chat_bubble.svg");
-                                        colorize: root.active-nav == "chats" ? root.user-accent-color : Theme.text-subtle;
-                                        width: 16px;
-                                        height: 16px;
-                                        y: (parent.height - self.height) / 2;
-                                    }
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 6px;
 
-                                    Text {
-                                        text: "Chats";
-                                        color: root.active-nav == "chats" ? root.user-accent-color : Theme.text-subtle;
-                                        font-size: 13px;
-                                        font-weight: root.active-nav == "chats" ? 700 : 500;
-                                        vertical-alignment: center;
+                                        Image {
+                                            source: @image-url("../assets/icons/chat_bubble.svg");
+                                            colorize: root.active-nav == "chats" ? root.user-accent-color : Theme.text-subtle;
+                                            width: 15px;
+                                            height: 15px;
+                                            y: (parent.height - self.height) / 2;
+                                        }
+
+                                        Text {
+                                            text: "Chats";
+                                            color: root.active-nav == "chats" ? root.user-accent-color : Theme.text-secondary;
+                                            font-size: 13px;
+                                            font-weight: root.active-nav == "chats" ? 700 : 500;
+                                            vertical-alignment: center;
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        // TAB 2: DISCOVER
-                        TouchArea {
-                            clicked => {
-                                root.active-nav = "discover";
-                                root.tab-clicked("discover");
-                            }
-                            Rectangle {
-                                border-radius: Theme.radius-pill;
-                                background: root.active-nav == "discover" ? #3d2c10 : transparent;
+                            // TAB 2: DISCOVER
+                            TouchArea {
+                                horizontal-stretch: 1;
+                                clicked => {
+                                    root.active-nav = "discover";
+                                    root.tab-clicked("discover");
+                                }
+                                Rectangle {
+                                    border-radius: 17px;
+                                    background: root.active-nav == "discover" ? #332610 : (parent.has-hover ? #1a222e : transparent);
+                                    border-width: root.active-nav == "discover" ? 1px : 0px;
+                                    border-color: root.user-accent-color;
 
-                                HorizontalLayout {
-                                    alignment: center;
-                                    spacing: 8px;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 6px;
 
-                                    Image {
-                                        source: @image-url("../assets/icons/explore.svg");
-                                        colorize: root.active-nav == "discover" ? root.user-accent-color : Theme.text-subtle;
-                                        width: 16px;
-                                        height: 16px;
-                                        y: (parent.height - self.height) / 2;
-                                    }
+                                        Image {
+                                            source: @image-url("../assets/icons/explore.svg");
+                                            colorize: root.active-nav == "discover" ? root.user-accent-color : Theme.text-subtle;
+                                            width: 15px;
+                                            height: 15px;
+                                            y: (parent.height - self.height) / 2;
+                                        }
 
-                                    Text {
-                                        text: "Discover";
-                                        color: root.active-nav == "discover" ? root.user-accent-color : Theme.text-subtle;
-                                        font-size: 13px;
-                                        font-weight: root.active-nav == "discover" ? 700 : 500;
-                                        vertical-alignment: center;
+                                        Text {
+                                            text: "Discover";
+                                            color: root.active-nav == "discover" ? root.user-accent-color : Theme.text-secondary;
+                                            font-size: 13px;
+                                            font-weight: root.active-nav == "discover" ? 700 : 500;
+                                            vertical-alignment: center;
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        // TAB 3: PROFILE
-                        TouchArea {
-                            clicked => {
-                                root.active-nav = "profile";
-                                root.tab-clicked("profile");
-                            }
-                            Rectangle {
-                                border-radius: Theme.radius-pill;
-                                background: root.active-nav == "profile" ? #3d2c10 : transparent;
+                            // TAB 3: PROFILE
+                            TouchArea {
+                                horizontal-stretch: 1;
+                                clicked => {
+                                    root.active-nav = "profile";
+                                    root.tab-clicked("profile");
+                                }
+                                Rectangle {
+                                    border-radius: 17px;
+                                    background: root.active-nav == "profile" ? #332610 : (parent.has-hover ? #1a222e : transparent);
+                                    border-width: root.active-nav == "profile" ? 1px : 0px;
+                                    border-color: root.user-accent-color;
 
-                                HorizontalLayout {
-                                    alignment: center;
-                                    spacing: 8px;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 6px;
 
-                                    Image {
-                                        source: @image-url("../assets/icons/person.svg");
-                                        colorize: root.active-nav == "profile" ? root.user-accent-color : Theme.text-subtle;
-                                        width: 16px;
-                                        height: 16px;
-                                        y: (parent.height - self.height) / 2;
-                                    }
+                                        Image {
+                                            source: @image-url("../assets/icons/person.svg");
+                                            colorize: root.active-nav == "profile" ? root.user-accent-color : Theme.text-subtle;
+                                            width: 15px;
+                                            height: 15px;
+                                            y: (parent.height - self.height) / 2;
+                                        }
 
-                                    Text {
-                                        text: "Profile";
-                                        color: root.active-nav == "profile" ? root.user-accent-color : Theme.text-subtle;
-                                        font-size: 13px;
-                                        font-weight: root.active-nav == "profile" ? 700 : 500;
-                                        vertical-alignment: center;
+                                        Text {
+                                            text: "Profile";
+                                            color: root.active-nav == "profile" ? root.user-accent-color : Theme.text-secondary;
+                                            font-size: 13px;
+                                            font-weight: root.active-nav == "profile" ? 700 : 500;
+                                            vertical-alignment: center;
+                                        }
                                     }
                                 }
                             }
@@ -457,39 +475,42 @@ export component MainWindow inherits Window {
                                     padding-left: 16px;
                                     padding-right: 16px;
                                     spacing: 14px;
-                                    alignment: center;
 
-                                    // Avatar circle
-                                    Rectangle {
-                                        width: 44px;
-                                        height: 44px;
-                                        border-radius: 22px;
-                                        background: Theme.surface-high;
-                                        border-width: conv.is-bot ? 1.5px : 0px;
-                                        border-color: conv.bubble-color;
+                                    // Avatar circle centered vertically
+                                    VerticalLayout {
+                                        alignment: center;
 
-                                        Text {
-                                            text: conv.avatar-letter;
-                                            color: conv.is-bot ? conv.bubble-color : root.user-accent-color;
-                                            font-size: 16px;
-                                            font-weight: 700;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                        }
+                                        Rectangle {
+                                            width: 46px;
+                                            height: 46px;
+                                            border-radius: 23px;
+                                            background: Theme.surface-high;
+                                            border-width: conv.is-bot ? 1.5px : 0px;
+                                            border-color: conv.bubble-color;
 
-                                        if conv.is-online : Rectangle {
-                                            width: 10px;
-                                            height: 10px;
-                                            x: 32px;
-                                            y: 32px;
-                                            border-radius: 5px;
-                                            background: #34d399;
-                                            border-width: 2px;
-                                            border-color: Theme.background;
+                                            Text {
+                                                text: conv.avatar-letter;
+                                                color: conv.is-bot ? conv.bubble-color : root.user-accent-color;
+                                                font-size: 17px;
+                                                font-weight: 700;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+
+                                            if conv.is-online : Rectangle {
+                                                width: 10px;
+                                                height: 10px;
+                                                x: 34px;
+                                                y: 34px;
+                                                border-radius: 5px;
+                                                background: #34d399;
+                                                border-width: 2px;
+                                                border-color: Theme.background;
+                                            }
                                         }
                                     }
 
-                                    // Text Column with strict spacing
+                                    // Text Column with strict right-aligned meta
                                     VerticalLayout {
                                         horizontal-stretch: 1;
                                         alignment: center;
@@ -504,12 +525,14 @@ export component MainWindow inherits Window {
                                                 font-size: 14px;
                                                 font-weight: 600;
                                                 overflow: elide;
+                                                vertical-alignment: center;
                                             }
                                             Text {
                                                 text: conv.timestamp;
                                                 color: Theme.text-subtle;
                                                 font-size: 11px;
                                                 horizontal-alignment: right;
+                                                vertical-alignment: center;
                                             }
                                         }
 
@@ -521,19 +544,23 @@ export component MainWindow inherits Window {
                                                 color: Theme.text-secondary;
                                                 font-size: 12px;
                                                 overflow: elide;
+                                                vertical-alignment: center;
                                             }
                                             Text {
                                                 text: ">";
                                                 color: Theme.text-subtle;
                                                 font-size: 11px;
                                                 horizontal-alignment: right;
+                                                vertical-alignment: center;
                                             }
                                         }
                                     }
                                 }
 
-                                // Hairline bottom divider
+                                // Hairline bottom divider indented past avatar
                                 Rectangle {
+                                    x: 76px;
+                                    width: parent.width - 76px;
                                     y: 71px;
                                     height: 1px;
                                     background: Theme.border-subtle;
@@ -673,22 +700,25 @@ export component MainWindow inherits Window {
                                 HorizontalLayout {
                                     padding: 14px;
                                     spacing: 14px;
-                                    alignment: center;
 
-                                    Rectangle {
-                                        width: 48px;
-                                        height: 48px;
-                                        border-radius: 24px;
-                                        background: Theme.surface-high;
-                                        border-width: 1.5px;
-                                        border-color: bot.bubble-color;
-                                        Text {
-                                            text: bot.avatar-letter;
-                                            color: bot.bubble-color;
-                                            font-size: 18px;
-                                            font-weight: 700;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
+                                    VerticalLayout {
+                                        alignment: center;
+
+                                        Rectangle {
+                                            width: 48px;
+                                            height: 48px;
+                                            border-radius: 24px;
+                                            background: Theme.surface-high;
+                                            border-width: 1.5px;
+                                            border-color: bot.bubble-color;
+                                            Text {
+                                                text: bot.avatar-letter;
+                                                color: bot.bubble-color;
+                                                font-size: 18px;
+                                                font-weight: 700;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
                                         }
                                     }
 
@@ -1189,13 +1219,21 @@ export component MainWindow inherits Window {
                             horizontal-stretch: 1;
                             height: 44px;
                             border-radius: 22px;
-                            background: Theme.card;
+                            background: Theme.surface-high;
                             border-width: 1px;
                             border-color: Theme.border;
 
+                            if root.draft-text == "" : Text {
+                                x: 18px;
+                                text: "Message...";
+                                color: Theme.text-subtle;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                            }
+
                             TextInput {
-                                x: 16px;
-                                width: parent.width - 32px;
+                                x: 18px;
+                                width: parent.width - 36px;
                                 height: 44px;
                                 text <=> root.draft-text;
                                 color: Theme.text-primary;
