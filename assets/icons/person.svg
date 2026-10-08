@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Head -->
+  <circle cx="12" cy="7.68" r="5.04" fill="currentColor"/>
+  <!-- Shoulders -->
+  <path fill="currentColor" d="M12 12.48c4.772 0 8.64 3.868 8.64 8.64v2.88H3.36v-2.88c0-4.772 3.868-8.64 8.64-8.64z"/>
+</svg>

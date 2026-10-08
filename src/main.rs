@@ -32,6 +32,21 @@ fn check_single_instance() -> bool {
     true
 }
 
+#[cfg(target_os = "windows")]
+fn trim_working_set() {
+    extern "system" {
+        fn GetCurrentProcess() -> *mut std::ffi::c_void;
+        fn SetProcessWorkingSetSize(
+            h_process: *mut std::ffi::c_void,
+            minimum_working_set_size: usize,
+            maximum_working_set_size: usize,
+        ) -> i32;
+    }
+    unsafe {
+        SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
+    }
+}
+
 fn create_tray_icon() -> Result<tray_icon::Icon, Box<dyn std::error::Error>> {
     let width: u32 = 32;
     let height: u32 = 32;
@@ -44,8 +59,8 @@ fn create_tray_icon() -> Result<tray_icon::Icon, Box<dyn std::error::Error>> {
             let dist = (dx * dx + dy * dy).sqrt();
 
             if dist <= 14.0 {
-                // Brand Teal: #2DD4BF (RGB: 45, 212, 191)
-                rgba.extend_from_slice(&[45, 212, 191, 255]);
+                // Amber accent: #FBBF24 (RGB: 251, 191, 36)
+                rgba.extend_from_slice(&[251, 191, 36, 255]);
             } else {
                 rgba.extend_from_slice(&[0, 0, 0, 0]);
             }
@@ -93,17 +108,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // UI Callbacks
-    let window_weak = main_window.as_weak();
     main_window.on_tab_clicked(|tab| {
         println!("Switched to tab: {}", tab);
     });
 
-    main_window.on_conversation_selected(|id, title, _avatar, _status| {
-        println!("Selected conversation {}: {}", id, title);
-    });
-
-    main_window.on_back_to_chats(|| {
-        println!("Navigated back to chats list");
+    main_window.on_conversation_selected(|id, title, subtitle, _avatar, is_bot, _color| {
+        println!("Selected conversation {}: {} ({}, is_bot: {})", id, title, subtitle, is_bot);
     });
 
     let window_for_send = main_window.as_weak();
@@ -119,19 +129,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 content: text,
                 timestamp: "Just now".into(),
                 is_me: true,
+                bubble_color: slint::Color::from_argb_u8(255, 251, 191, 36),
             });
             let model = std::rc::Rc::new(slint::VecModel::from(msgs));
             w.set_messages(model.into());
         }
     });
 
-    // Background Tray & Menu Event Polling Timer
+    // Background Tray & Menu Event Polling Timer + Working Set Trimmer
     let timer = slint::Timer::default();
-    let window_for_tray = window_weak.clone();
+    let window_for_tray = main_window.as_weak();
+    let mut poll_count: u32 = 0;
     timer.start(
         slint::TimerMode::Repeated,
         std::time::Duration::from_millis(150),
         move || {
+            poll_count = poll_count.wrapping_add(1);
+
+            // Periodically flush unneeded heap/pages to maintain ultra-low RAM
+            #[cfg(target_os = "windows")]
+            if poll_count % 30 == 0 {
+                trim_working_set();
+            }
+
             // Process menu events
             if let Ok(event) = muda::MenuEvent::receiver().try_recv() {
                 if event.id == open_menu_id {
@@ -157,6 +177,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
     );
+
+    // Initial memory working set flush
+    #[cfg(target_os = "windows")]
+    trim_working_set();
 
     // Run main application event loop
     main_window.run()?;

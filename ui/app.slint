@@ -3,12 +3,13 @@ import { Theme } from "theme.slint";
 export struct ConversationItem {
     id: string,
     title: string,
+    subtitle: string,
     avatar_letter: string,
     last_message: string,
     timestamp: string,
     is_bot: bool,
     is_online: bool,
-    unread_count: int,
+    bubble_color: color,
 }
 
 export struct MessageItem {
@@ -16,485 +17,1009 @@ export struct MessageItem {
     content: string,
     timestamp: string,
     is_me: bool,
+    bubble_color: color,
+}
+
+export struct BotCardItem {
+    id: string,
+    name: string,
+    bio: string,
+    avatar_letter: string,
+    bubble_color: color,
 }
 
 export component MainWindow inherits Window {
     title: "RtText";
-    width: 420px;
-    height: 720px;
+    width: 1040px;
+    height: 680px;
     background: Theme.background;
     default-font-size: 13px;
 
-    in-out property <string> active-tab: "chats";
-    in-out property <bool> is-in-chat: false;
-    in-out property <string> active-chat-title: "Gojo Satoru";
-    in-out property <string> active-chat-avatar: "G";
-    in-out property <string> active-chat-status: "Ready to chat • 1 bead";
+    in-out property <string> active-nav: "chats"; // "chats", "discover", "profile"
+    in-out property <string> discover-subnav: "characters"; // "characters", "people"
+
+    in-out property <string> active-chat-id: "nobara";
+    in-out property <string> active-chat-title: "Nobara Kugisaki";
+    in-out property <string> active-chat-subtitle: "Student at tokyo high";
+    in-out property <string> active-chat-avatar: "N";
+    in-out property <bool> active-chat-is-bot: true;
+    in-out property <color> active-chat-bubble-color: #fb7185;
+
     in-out property <string> draft-text: "";
-    in-out property <string> current-username: "Lemomation";
-    in-out property <int> bead-balance: 100;
+    in-out property <string> current-username: "LDaccoutn";
+    in-out property <int> bead-balance: 139;
 
     in-out property <[ConversationItem]> conversations: [
         {
-            id: "bot-1",
-            title: "Gojo Satoru",
-            avatar_letter: "G",
-            last_message: "Let's continue our conversation!",
-            timestamp: "10:42 AM",
+            id: "nobara",
+            title: "Nobara Kugisaki",
+            subtitle: "Student at tokyo high",
+            avatar_letter: "N",
+            last_message: "Obviously it does. I don't need you...",
+            timestamp: "14:16",
             is_bot: true,
             is_online: false,
-            unread_count: 0,
+            bubble_color: #fb7185,
         },
         {
-            id: "dm-1",
-            title: "Alice",
-            avatar_letter: "A",
-            last_message: "See you on the desktop app!",
-            timestamp: "Yesterday",
+            id: "sorcerors",
+            title: "Sorcerors",
+            subtitle: "5 members • 1 bot",
+            avatar_letter: "S",
+            last_message: "Yo! What's up? Did someone su...",
+            timestamp: "14:33",
+            is_bot: false,
+            is_online: false,
+            bubble_color: #1a212b,
+        },
+        {
+            id: "suhaibawan",
+            title: "suhaibawan000",
+            subtitle: "Online",
+            avatar_letter: "S",
+            last_message: "You: hi",
+            timestamp: "14:17",
             is_bot: false,
             is_online: true,
-            unread_count: 0,
+            bubble_color: #1a212b,
+        },
+        {
+            id: "anika",
+            title: "anikaitanikait10",
+            subtitle: "Last active 13:38",
+            avatar_letter: "A",
+            last_message: "basa photo try kar raha tha",
+            timestamp: "13:38",
+            is_bot: false,
+            is_online: false,
+            bubble_color: #1a212b,
+        },
+        {
+            id: "bilquees",
+            title: "Bilquees",
+            subtitle: "Last active 13:29",
+            avatar_letter: "B",
+            last_message: "You: Hello",
+            timestamp: "13:29",
+            is_bot: false,
+            is_online: false,
+            bubble_color: #1a212b,
+        },
+        {
+            id: "uabid",
+            title: "uabidM",
+            subtitle: "Online",
+            avatar_letter: "U",
+            last_message: "Photo",
+            timestamp: "13:20",
+            is_bot: false,
+            is_online: true,
+            bubble_color: #1a212b,
         },
     ];
 
     in-out property <[MessageItem]> messages: [
         {
             id: "m-1",
-            content: "Yo! What's up? Ready to build RtText on Windows with 1:1 Material 3 fidelity!",
-            timestamp: "10:40 AM",
-            is_me: false,
+            content: "no absolutely not",
+            timestamp: "2:14 PM",
+            is_me: true,
+            bubble_color: Theme.primary,
         },
         {
             id: "m-2",
-            content: "Let's do Rust with 1:1 material 3 UI, we'll edit things as we go along!",
-            timestamp: "10:41 AM",
+            content: "Good! Now stop asking dumb questions and tell me something interesting.",
+            timestamp: "2:14 PM",
+            is_me: false,
+            bubble_color: #fb7185,
+        },
+        {
+            id: "m-3",
+            content: "i don't think there is anything interesting in my life",
+            timestamp: "2:15 PM",
             is_me: true,
+            bubble_color: Theme.primary,
+        },
+        {
+            id: "m-4",
+            content: "Tch, boring. Fine, I'll go first. I bought a new skirt today and it looks amazing on me. Not that you'd appreciate it anyway.",
+            timestamp: "2:15 PM",
+            is_me: false,
+            bubble_color: #fb7185,
+        },
+        {
+            id: "m-5",
+            content: "I'm sure it looks good 👍",
+            timestamp: "2:16 PM",
+            is_me: true,
+            bubble_color: Theme.primary,
+        },
+        {
+            id: "m-6",
+            content: "Obviously it does. I don't need you to tell me that.",
+            timestamp: "2:16 PM",
+            is_me: false,
+            bubble_color: #fb7185,
+        },
+    ];
+
+    in-out property <[BotCardItem]> bot_directory: [
+        {
+            id: "nobara",
+            name: "Nobara Kugisaki",
+            bio: "Student at tokyo high",
+            avatar_letter: "N",
+            bubble_color: #fb7185,
+        },
+        {
+            id: "fifa",
+            name: "Fifa Helper",
+            bio: "I know everything about fifa",
+            avatar_letter: "F",
+            bubble_color: #60a5fa,
+        },
+        {
+            id: "gojo",
+            name: "Gojo Satouru",
+            bio: "The strongest sorcerer",
+            avatar_letter: "G",
+            bubble_color: #38bdf8,
         },
     ];
 
     callback tab-clicked(string);
-    callback conversation-selected(string, string, string, string);
-    callback back-to-chats();
+    callback conversation-selected(string, string, string, string, bool, color);
     callback send-message(string);
 
-    VerticalLayout {
+    // HORIZONTAL TWO-PANE LAYOUT
+    HorizontalLayout {
         padding: 0px;
         spacing: 0px;
 
-        // TOP APP BAR
+        // ==========================================
+        // LEFT PANE (SIDEBAR: 360px)
+        // ==========================================
         Rectangle {
-            height: 56px;
+            width: 360px;
             background: Theme.background;
 
-            HorizontalLayout {
-                padding-left: 16px;
-                padding-right: 16px;
-                alignment: space-between;
+            // Border right
+            Rectangle {
+                x: parent.width - 1px;
+                width: 1px;
+                height: parent.height;
+                background: Theme.border;
+            }
 
-                if !root.is-in-chat : Text {
-                    text: root.active-tab == "chats" ? "RtText" : (root.active-tab == "discover" ? "Discover" : "Profile");
-                    color: Theme.text-primary;
-                    font-size: 19px;
-                    font-weight: 700;
-                    vertical-alignment: center;
-                }
+            VerticalLayout {
+                padding: 0px;
+                spacing: 0px;
 
-                if root.is-in-chat : HorizontalLayout {
-                    spacing: 12px;
-                    alignment: start;
+                // SIDEBAR TOP BAR (RtText Title & Search & Plus)
+                Rectangle {
+                    height: 56px;
+                    background: Theme.background;
 
-                    back-touch := TouchArea {
-                        width: 36px;
-                        height: 36px;
-                        clicked => {
-                            root.is-in-chat = false;
-                            root.back-to-chats();
-                        }
-                        Rectangle {
-                            border-radius: Theme.radius-pill;
-                            background: back-touch.has-hover ? Theme.surface-high : transparent;
-                            Text {
-                                text: "←";
-                                color: Theme.text-primary;
-                                font-size: 18px;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
+                    HorizontalLayout {
+                        padding-left: 18px;
+                        padding-right: 18px;
+                        alignment: space-between;
 
-                    Rectangle {
-                        width: 36px;
-                        height: 36px;
-                        border-radius: Theme.radius-pill;
-                        background: Theme.surface-high;
-                        border-width: 1px;
-                        border-color: Theme.primary;
                         Text {
-                            text: root.active-chat-avatar;
-                            color: Theme.primary;
-                            font-size: 14px;
-                            font-weight: 700;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 2px;
-                        Text {
-                            text: root.active-chat-title;
+                            text: "RtText";
                             color: Theme.text-primary;
-                            font-size: 14px;
-                            font-weight: 700;
-                        }
-                        Text {
-                            text: root.active-chat-status;
-                            color: Theme.primary;
-                            font-size: 11px;
-                        }
-                    }
-                }
-
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: end;
-                    if !root.is-in-chat && root.active-tab == "chats" : Rectangle {
-                        width: 36px;
-                        height: 36px;
-                        border-radius: Theme.radius-pill;
-                        background: Theme.primary;
-                        Text {
-                            text: "+";
-                            color: Theme.background;
                             font-size: 20px;
                             font-weight: 700;
-                            horizontal-alignment: center;
                             vertical-alignment: center;
                         }
-                    }
-                }
-            }
-        }
 
-        // SEPARATOR
-        Rectangle {
-            height: 1px;
-            background: Theme.border;
-        }
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: end;
 
-        // MAIN BODY
-        Rectangle {
-            vertical-stretch: 1;
-            background: Theme.background;
-
-            // CHATS TAB
-            if !root.is-in-chat && root.active-tab == "chats" : Flickable {
-                VerticalLayout {
-                    alignment: start;
-                    spacing: 0px;
-
-                    for conv in root.conversations : conv-touch := TouchArea {
-                        height: 72px;
-                        clicked => {
-                            root.active-chat-title = conv.title;
-                            root.active-chat-avatar = conv.avatar-letter;
-                            root.active-chat-status = conv.is-bot ? "Ready to chat • 1 bead" : (conv.is-online ? "Online • Free DM" : "Offline");
-                            root.is-in-chat = true;
-                            root.conversation-selected(conv.id, conv.title, conv.avatar-letter, root.active-chat-status);
-                        }
-
-                        Rectangle {
-                            background: conv-touch.has-hover ? Theme.surface : transparent;
-
-                            HorizontalLayout {
-                                padding-left: 16px;
-                                padding-right: 16px;
-                                spacing: 14px;
-                                alignment: center;
-
+                            // Search button
+                            TouchArea {
+                                width: 36px;
+                                height: 36px;
                                 Rectangle {
-                                    width: 44px;
-                                    height: 44px;
                                     border-radius: Theme.radius-pill;
-                                    background: Theme.surface-high;
-                                    border-width: conv.is-bot ? 1px : 0px;
-                                    border-color: Theme.primary;
+                                    background: parent.has-hover ? Theme.surface-high : transparent;
+                                    Image {
+                                        source: @image-url("assets/icons/search.svg");
+                                        width: 18px;
+                                        height: 18px;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                    }
+                                }
+                            }
 
+                            // Plus FAB button
+                            TouchArea {
+                                width: 36px;
+                                height: 36px;
+                                Rectangle {
+                                    border-radius: Theme.radius-pill;
+                                    background: Theme.primary;
                                     Text {
-                                        text: conv.avatar-letter;
-                                        color: conv.is-bot ? Theme.primary : Theme.text-primary;
-                                        font-size: 16px;
+                                        text: "+";
+                                        color: Theme.on-primary;
+                                        font-size: 20px;
                                         font-weight: 700;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
 
-                                    if conv.is-online : Rectangle {
-                                        width: 10px;
-                                        height: 10px;
-                                        x: 32px;
-                                        y: 32px;
-                                        border-radius: 5px;
-                                        background: Theme.primary;
-                                        border-width: 2px;
-                                        border-color: Theme.background;
+                // SIDEBAR NAVIGATION TABS (Chats | Discover | Profile)
+                Rectangle {
+                    height: 48px;
+                    background: Theme.surface;
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 6px;
+                        alignment: space-around;
+
+                        // TAB 1: CHATS
+                        touch-nav-chats := TouchArea {
+                            clicked => {
+                                root.active-nav = "chats";
+                                root.tab-clicked("chats");
+                            }
+                            Rectangle {
+                                border-radius: Theme.radius-pill;
+                                background: root.active-nav == "chats" ? Theme.primary-container : transparent;
+
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 8px;
+
+                                    Image {
+                                        source: @image-url("assets/icons/chat_bubble.svg");
+                                        width: 16px;
+                                        height: 16px;
+                                        y: (parent.height - self.height) / 2;
+                                    }
+
+                                    Text {
+                                        text: "Chats";
+                                        color: root.active-nav == "chats" ? Theme.primary : Theme.text-secondary;
+                                        font-size: 13px;
+                                        font-weight: root.active-nav == "chats" ? 700 : 500;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        // TAB 2: DISCOVER
+                        touch-nav-discover := TouchArea {
+                            clicked => {
+                                root.active-nav = "discover";
+                                root.tab-clicked("discover");
+                            }
+                            Rectangle {
+                                border-radius: Theme.radius-pill;
+                                background: root.active-nav == "discover" ? Theme.primary-container : transparent;
+
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 8px;
+
+                                    Image {
+                                        source: @image-url("assets/icons/explore.svg");
+                                        width: 16px;
+                                        height: 16px;
+                                        y: (parent.height - self.height) / 2;
+                                    }
+
+                                    Text {
+                                        text: "Discover";
+                                        color: root.active-nav == "discover" ? Theme.primary : Theme.text-secondary;
+                                        font-size: 13px;
+                                        font-weight: root.active-nav == "discover" ? 700 : 500;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        // TAB 3: PROFILE
+                        touch-nav-profile := TouchArea {
+                            clicked => {
+                                root.active-nav = "profile";
+                                root.tab-clicked("profile");
+                            }
+                            Rectangle {
+                                border-radius: Theme.radius-pill;
+                                background: root.active-nav == "profile" ? Theme.primary-container : transparent;
+
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 8px;
+
+                                    Image {
+                                        source: @image-url("assets/icons/person.svg");
+                                        width: 16px;
+                                        height: 16px;
+                                        y: (parent.height - self.height) / 2;
+                                    }
+
+                                    Text {
+                                        text: "Profile";
+                                        color: root.active-nav == "profile" ? Theme.primary : Theme.text-secondary;
+                                        font-size: 13px;
+                                        font-weight: root.active-nav == "profile" ? 700 : 500;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // BORDER SUBTLE
+                Rectangle {
+                    height: 1px;
+                    background: Theme.border-subtle;
+                }
+
+                // ==========================================
+                // SIDEBAR CONTENT: 1. CHATS LIST
+                // ==========================================
+                if root.active-nav == "chats" : Flickable {
+                    vertical-stretch: 1;
+
+                    VerticalLayout {
+                        alignment: start;
+                        spacing: 0px;
+
+                        for conv in root.conversations : touch-item := TouchArea {
+                            height: 72px;
+                            clicked => {
+                                root.active-chat-id = conv.id;
+                                root.active-chat-title = conv.title;
+                                root.active-chat-subtitle = conv.subtitle;
+                                root.active-chat-avatar = conv.avatar-letter;
+                                root.active-chat-is-bot = conv.is-bot;
+                                root.active-chat-bubble-color = conv.bubble-color;
+                                root.conversation-selected(
+                                    conv.id,
+                                    conv.title,
+                                    conv.subtitle,
+                                    conv.avatar-letter,
+                                    conv.is-bot,
+                                    conv.bubble-color
+                                );
+                            }
+
+                            Rectangle {
+                                background: root.active-chat-id == conv.id ? Theme.surface-high : (touch-item.has-hover ? Theme.surface : transparent);
+
+                                HorizontalLayout {
+                                    padding-left: 16px;
+                                    padding-right: 16px;
+                                    spacing: 12px;
+                                    alignment: center;
+
+                                    // Avatar circle
+                                    Rectangle {
+                                        width: 44px;
+                                        height: 44px;
+                                        border-radius: Theme.radius-pill;
+                                        background: Theme.surface-high;
+                                        border-width: conv.is-bot ? 1px : 0px;
+                                        border-color: Theme.primary;
+
+                                        Text {
+                                            text: conv.avatar-letter;
+                                            color: conv.is-bot ? Theme.primary : Theme.text-primary;
+                                            font-size: 16px;
+                                            font-weight: 700;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+
+                                        if conv.is-online : Rectangle {
+                                            width: 11px;
+                                            height: 11px;
+                                            x: 32px;
+                                            y: 32px;
+                                            border-radius: 5.5px;
+                                            background: #34d399;
+                                            border-width: 2px;
+                                            border-color: Theme.background;
+                                        }
+                                    }
+
+                                    // Content texts
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        alignment: center;
+                                        spacing: 4px;
+
+                                        HorizontalLayout {
+                                            alignment: space-between;
+                                            Text {
+                                                text: conv.title;
+                                                color: Theme.text-primary;
+                                                font-size: 14px;
+                                                font-weight: 600;
+                                            }
+                                            Text {
+                                                text: conv.timestamp;
+                                                color: Theme.text-subtle;
+                                                font-size: 11px;
+                                            }
+                                        }
+
+                                        HorizontalLayout {
+                                            alignment: space-between;
+                                            Text {
+                                                text: conv.last-message;
+                                                color: Theme.text-secondary;
+                                                font-size: 12px;
+                                                overflow: elide;
+                                            }
+                                            Text {
+                                                text: ">";
+                                                color: Theme.text-subtle;
+                                                font-size: 11px;
+                                            }
+                                        }
                                     }
                                 }
 
-                                VerticalLayout {
-                                    horizontal-stretch: 1;
-                                    alignment: center;
-                                    spacing: 4px;
+                                // Hairline divider
+                                Rectangle {
+                                    y: 71px;
+                                    height: 1px;
+                                    background: Theme.border-subtle;
+                                }
+                            }
+                        }
+                    }
+                }
 
-                                    HorizontalLayout {
-                                        alignment: space-between;
+                // ==========================================
+                // SIDEBAR CONTENT: 2. DISCOVER
+                // ==========================================
+                if root.active-nav == "discover" : Flickable {
+                    vertical-stretch: 1;
+
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 16px;
+                        alignment: start;
+
+                        // Segmented pill (Characters | People)
+                        Rectangle {
+                            height: 38px;
+                            border-radius: Theme.radius-pill;
+                            background: Theme.surface;
+                            border-width: 1px;
+                            border-color: Theme.border;
+
+                            HorizontalLayout {
+                                padding: 2px;
+                                spacing: 2px;
+
+                                TouchArea {
+                                    horizontal-stretch: 1;
+                                    clicked => { root.discover-subnav = "characters"; }
+                                    Rectangle {
+                                        border-radius: Theme.radius-pill;
+                                        background: root.discover-subnav == "characters" ? Theme.primary-container : transparent;
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 6px;
+                                            Image {
+                                                source: @image-url("assets/icons/sparkle.svg");
+                                                width: 14px;
+                                                height: 14px;
+                                                y: (parent.height - self.height) / 2;
+                                            }
+                                            Text {
+                                                text: "Characters";
+                                                color: root.discover-subnav == "characters" ? Theme.primary : Theme.text-secondary;
+                                                font-size: 12px;
+                                                font-weight: 700;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                TouchArea {
+                                    horizontal-stretch: 1;
+                                    clicked => { root.discover-subnav = "people"; }
+                                    Rectangle {
+                                        border-radius: Theme.radius-pill;
+                                        background: root.discover-subnav == "people" ? Theme.primary-container : transparent;
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 6px;
+                                            Image {
+                                                source: @image-url("assets/icons/person.svg");
+                                                width: 14px;
+                                                height: 14px;
+                                                y: (parent.height - self.height) / 2;
+                                            }
+                                            Text {
+                                                text: "People";
+                                                color: root.discover-subnav == "people" ? Theme.primary : Theme.text-secondary;
+                                                font-size: 12px;
+                                                font-weight: 700;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Search Characters input
+                        Rectangle {
+                            height: 40px;
+                            border-radius: Theme.radius-pill;
+                            background: Theme.card;
+                            border-width: 1px;
+                            border-color: Theme.border;
+
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+                                spacing: 10px;
+                                alignment: center;
+
+                                Image {
+                                    source: @image-url("assets/icons/search.svg");
+                                    width: 16px;
+                                    height: 16px;
+                                }
+
+                                Text {
+                                    text: "Search characters...";
+                                    color: Theme.text-subtle;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        // Bot Cards
+                        for bot in root.bot_directory : touch-bot := TouchArea {
+                            height: 84px;
+                            clicked => {
+                                root.active-chat-id = bot.id;
+                                root.active-chat-title = bot.name;
+                                root.active-chat-subtitle = bot.bio;
+                                root.active-chat-avatar = bot.avatar-letter;
+                                root.active-chat-is-bot = true;
+                                root.active-chat-bubble-color = bot.bubble-color;
+                                root.active-nav = "chats";
+                            }
+
+                            Rectangle {
+                                border-radius: Theme.radius-lg;
+                                background: touch-bot.has-hover ? Theme.surface-high : Theme.card;
+                                border-width: 1px;
+                                border-color: Theme.border;
+
+                                HorizontalLayout {
+                                    padding: 14px;
+                                    spacing: 14px;
+                                    alignment: center;
+
+                                    Rectangle {
+                                        width: 48px;
+                                        height: 48px;
+                                        border-radius: Theme.radius-pill;
+                                        background: Theme.surface-high;
+                                        border-width: 1px;
+                                        border-color: bot.bubble-color;
                                         Text {
-                                            text: conv.title;
+                                            text: bot.avatar-letter;
+                                            color: bot.bubble-color;
+                                            font-size: 18px;
+                                            font-weight: 700;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        alignment: center;
+                                        spacing: 3px;
+                                        Text {
+                                            text: bot.name;
                                             color: Theme.text-primary;
                                             font-size: 14px;
-                                            font-weight: 600;
+                                            font-weight: 700;
                                         }
                                         Text {
-                                            text: conv.timestamp;
+                                            text: bot.bio;
+                                            color: Theme.text-secondary;
+                                            font-size: 12px;
+                                            overflow: elide;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ==========================================
+                // SIDEBAR CONTENT: 3. PROFILE
+                // ==========================================
+                if root.active-nav == "profile" : Flickable {
+                    vertical-stretch: 1;
+
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 16px;
+                        alignment: start;
+
+                        // Profile Header with Avatar & Username
+                        Rectangle {
+                            height: 120px;
+                            border-radius: Theme.radius-lg;
+                            background: Theme.card;
+                            border-width: 1px;
+                            border-color: Theme.border;
+
+                            VerticalLayout {
+                                padding: 16px;
+                                alignment: center;
+                                spacing: 8px;
+
+                                HorizontalLayout {
+                                    spacing: 14px;
+                                    alignment: center;
+
+                                    Rectangle {
+                                        width: 52px;
+                                        height: 52px;
+                                        border-radius: Theme.radius-pill;
+                                        background: Theme.surface-high;
+                                        border-width: 1.5px;
+                                        border-color: Theme.primary;
+                                        Text {
+                                            text: "L";
+                                            color: Theme.primary;
+                                            font-size: 20px;
+                                            font-weight: 700;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 2px;
+                                        Text {
+                                            text: root.current-username;
+                                            color: Theme.text-primary;
+                                            font-size: 16px;
+                                            font-weight: 700;
+                                        }
+                                        Text {
+                                            text: "@" + root.current-username;
+                                            color: Theme.text-subtle;
+                                            font-size: 12px;
+                                        }
+                                        Text {
+                                            text: "Joined October 2026";
                                             color: Theme.text-subtle;
                                             font-size: 11px;
                                         }
                                     }
+                                }
+                            }
+                        }
 
+                        // BEAD BALANCE CARD (Matching Screenshot 3)
+                        Rectangle {
+                            height: 72px;
+                            border-radius: Theme.radius-lg;
+                            background: Theme.card;
+                            border-width: 1px;
+                            border-color: Theme.border;
+
+                            HorizontalLayout {
+                                padding-left: 20px;
+                                padding-right: 20px;
+                                alignment: center;
+                                spacing: 14px;
+
+                                Image {
+                                    source: @image-url("assets/icons/bead.svg");
+                                    width: 36px;
+                                    height: 36px;
+                                    y: (parent.height - self.height) / 2;
+                                }
+
+                                Text {
+                                    text: "\{root.bead-balance}";
+                                    color: Theme.primary;
+                                    font-size: 24px;
+                                    font-weight: 800;
+                                    vertical-alignment: center;
+                                }
+
+                                Text {
+                                    text: "beads";
+                                    color: Theme.text-secondary;
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        // APPEARANCE PRESETS (Matching Screenshot 3)
+                        Rectangle {
+                            height: 100px;
+                            border-radius: Theme.radius-lg;
+                            background: Theme.card;
+                            border-width: 1px;
+                            border-color: Theme.border;
+
+                            VerticalLayout {
+                                padding: 14px;
+                                spacing: 12px;
+
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    alignment: start;
+                                    Image {
+                                        source: @image-url("assets/icons/palette.svg");
+                                        width: 16px;
+                                        height: 16px;
+                                        y: (parent.height - self.height) / 2;
+                                    }
                                     Text {
-                                        text: conv.last-message;
-                                        color: Theme.text-secondary;
-                                        font-size: 12px;
-                                        overflow: elide;
+                                        text: "Appearance";
+                                        color: Theme.text-primary;
+                                        font-size: 13px;
+                                        font-weight: 600;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    alignment: space-around;
+
+                                    // Swatches
+                                    Rectangle { width: 28px; height: 28px; border-radius: 14px; background: #2dd4bf; }
+                                    Rectangle { width: 28px; height: 28px; border-radius: 14px; background: #a78bfa; }
+                                    Rectangle { width: 28px; height: 28px; border-radius: 14px; background: #fb7185; }
+                                    Rectangle {
+                                        width: 28px;
+                                        height: 28px;
+                                        border-radius: 14px;
+                                        background: #fbbf24;
+                                        Text { text: "✓"; color: #0b0f14; font-size: 14px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+                                    }
+                                    Rectangle { width: 28px; height: 28px; border-radius: 14px; background: #60a5fa; }
+                                    Rectangle { width: 28px; height: 28px; border-radius: 14px; background: #34d399; }
+                                }
+                            }
+                        }
+
+                        // APP UPDATES CARD (Matching Screenshot 4)
+                        Rectangle {
+                            height: 72px;
+                            border-radius: Theme.radius-lg;
+                            background: Theme.card;
+                            border-width: 1px;
+                            border-color: Theme.border;
+
+                            HorizontalLayout {
+                                padding-left: 16px;
+                                padding-right: 16px;
+                                alignment: space-between;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 2px;
+                                    Text {
+                                        text: "App updates";
+                                        color: Theme.text-primary;
+                                        font-size: 14px;
+                                        font-weight: 600;
+                                    }
+                                    Text {
+                                        text: "Desktop v0.1.0 • System Tray Active";
+                                        color: Theme.text-subtle;
+                                        font-size: 11px;
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 80px;
+                                    height: 32px;
+                                    border-radius: Theme.radius-pill;
+                                    border-width: 1px;
+                                    border-color: Theme.primary;
+                                    Text {
+                                        text: "Latest";
+                                        color: Theme.primary;
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
                                     }
                                 }
                             }
-
-                            Rectangle {
-                                y: 71px;
-                                height: 1px;
-                                background: Theme.surface-high;
-                            }
                         }
                     }
                 }
             }
+        }
 
-            // DISCOVER TAB
-            if !root.is-in-chat && root.active-tab == "discover" : VerticalLayout {
-                padding: 16px;
-                spacing: 12px;
+        // ==========================================
+        // RIGHT PANE (ACTIVE CHAT: WhatsApp / Telegram style)
+        // ==========================================
+        Rectangle {
+            horizontal-stretch: 1;
+            background: Theme.background;
 
-                Text {
-                    text: "Featured AI Bots";
-                    color: Theme.text-primary;
-                    font-size: 15px;
-                    font-weight: 700;
-                }
-
-                Rectangle {
-                    height: 80px;
-                    border-radius: Theme.radius-md;
-                    background: Theme.surface;
-                    border-width: 1px;
-                    border-color: Theme.border;
-
-                    HorizontalLayout {
-                        padding: 12px;
-                        spacing: 12px;
-                        alignment: center;
-
-                        Rectangle {
-                            width: 44px;
-                            height: 44px;
-                            border-radius: Theme.radius-pill;
-                            background: Theme.surface-high;
-                            border-width: 1px;
-                            border-color: Theme.primary;
-                            Text {
-                                text: "G";
-                                color: Theme.primary;
-                                font-size: 16px;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-
-                        VerticalLayout {
-                            horizontal-stretch: 1;
-                            alignment: center;
-                            spacing: 3px;
-                            Text {
-                                text: "Gojo Satoru";
-                                color: Theme.text-primary;
-                                font-size: 14px;
-                                font-weight: 600;
-                            }
-                            Text {
-                                text: "The strongest Jujutsu Sorcerer";
-                                color: Theme.text-secondary;
-                                font-size: 12px;
-                            }
-                        }
-
-                        Rectangle {
-                            width: 64px;
-                            height: 32px;
-                            border-radius: Theme.radius-pill;
-                            background: Theme.primary;
-                            Text {
-                                text: "Chat";
-                                color: Theme.background;
-                                font-size: 12px;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // PROFILE TAB
-            if !root.is-in-chat && root.active-tab == "profile" : VerticalLayout {
-                padding: 16px;
-                spacing: 16px;
-
-                Rectangle {
-                    height: 80px;
-                    border-radius: Theme.radius-md;
-                    background: Theme.surface;
-                    border-width: 1px;
-                    border-color: Theme.border;
-
-                    HorizontalLayout {
-                        padding: 14px;
-                        spacing: 14px;
-                        alignment: center;
-
-                        Rectangle {
-                            width: 50px;
-                            height: 50px;
-                            border-radius: Theme.radius-pill;
-                            background: Theme.surface-high;
-                            border-width: 1px;
-                            border-color: Theme.primary;
-                            Text {
-                                text: "L";
-                                color: Theme.primary;
-                                font-size: 18px;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-
-                        VerticalLayout {
-                            alignment: center;
-                            spacing: 2px;
-                            Text {
-                                text: root.current-username;
-                                color: Theme.text-primary;
-                                font-size: 15px;
-                                font-weight: 700;
-                            }
-                            Text {
-                                text: "@lemomation";
-                                color: Theme.text-subtle;
-                                font-size: 12px;
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    height: 64px;
-                    border-radius: Theme.radius-md;
-                    background: Theme.surface;
-                    border-width: 1px;
-                    border-color: Theme.border;
-
-                    HorizontalLayout {
-                        padding-left: 16px;
-                        padding-right: 16px;
-                        alignment: space-between;
-
-                        HorizontalLayout {
-                            spacing: 10px;
-                            alignment: center;
-                            Text {
-                                text: "✨";
-                                font-size: 18px;
-                                vertical-alignment: center;
-                            }
-                            Text {
-                                text: "Bead Balance";
-                                color: Theme.text-secondary;
-                                font-size: 13px;
-                                vertical-alignment: center;
-                            }
-                        }
-
-                        Text {
-                            text: "\{root.bead-balance} Beads";
-                            color: Theme.primary;
-                            font-size: 16px;
-                            font-weight: 700;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-
-                Text {
-                    text: "RtText Windows Desktop v0.1.0 • Running in System Tray";
-                    color: Theme.text-subtle;
-                    font-size: 11px;
-                    horizontal-alignment: center;
-                }
-            }
-
-            // CHAT SCREEN
-            if root.is-in-chat : VerticalLayout {
+            VerticalLayout {
                 padding: 0px;
                 spacing: 0px;
 
+                // CHAT HEADER (Matching Screenshot 5)
+                Rectangle {
+                    height: 56px;
+                    background: Theme.surface;
+
+                    // Border bottom
+                    Rectangle {
+                        y: parent.height - 1px;
+                        height: 1px;
+                        background: Theme.border;
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 20px;
+                        padding-right: 20px;
+                        alignment: space-between;
+
+                        HorizontalLayout {
+                            spacing: 14px;
+                            alignment: start;
+
+                            // Avatar
+                            Rectangle {
+                                width: 38px;
+                                height: 38px;
+                                border-radius: Theme.radius-pill;
+                                background: Theme.surface-high;
+                                border-width: 1px;
+                                border-color: root.active-chat-bubble-color;
+                                y: (parent.height - self.height) / 2;
+
+                                Text {
+                                    text: root.active-chat-avatar;
+                                    color: root.active-chat-bubble-color;
+                                    font-size: 16px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // Title & Subtitle
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+
+                                Text {
+                                    text: root.active-chat-title;
+                                    color: Theme.text-primary;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                }
+
+                                Text {
+                                    text: root.active-chat-subtitle;
+                                    color: Theme.text-secondary;
+                                    font-size: 11px;
+                                }
+                            }
+                        }
+
+                        // Right Bot icon (matching Screenshot 5 robot head)
+                        HorizontalLayout {
+                            alignment: end;
+                            y: (parent.height - 24px) / 2;
+
+                            if root.active-chat-is-bot : Image {
+                                source: @image-url("assets/icons/robot.svg");
+                                width: 24px;
+                                height: 24px;
+                            }
+                        }
+                    }
+                }
+
+                // MESSAGES SCROLL FEED (Matching Screenshot 5)
                 Flickable {
                     vertical-stretch: 1;
 
                     VerticalLayout {
-                        padding: 12px;
-                        spacing: 10px;
+                        padding: 16px;
+                        spacing: 12px;
                         alignment: start;
 
                         for msg in root.messages : HorizontalLayout {
                             alignment: msg.is-me ? end : start;
 
                             Rectangle {
-                                max-width: 300px;
-                                border-radius: Theme.radius-md;
-                                background: msg.is-me ? Theme.primary : Theme.surface;
-                                border-width: msg.is-me ? 0px : 1px;
-                                border-color: Theme.border;
+                                max-width: 480px;
+                                border-radius: Theme.radius-lg;
+                                background: msg.is-me ? Theme.primary : msg.bubble_color;
 
                                 VerticalLayout {
-                                    padding: 10px;
+                                    padding-top: 10px;
+                                    padding-bottom: 8px;
+                                    padding-left: 14px;
+                                    padding-right: 14px;
                                     spacing: 4px;
 
                                     Text {
                                         text: msg.content;
-                                        color: msg.is-me ? Theme.background : Theme.text-primary;
+                                        color: msg.is-me ? #0b0f14 : #ffffff;
                                         font-size: 13px;
                                         wrap: word-wrap;
                                     }
 
-                                    Text {
-                                        text: msg.timestamp;
-                                        color: msg.is-me ? #0b0f14 : Theme.text-subtle;
-                                        font-size: 10px;
-                                        horizontal-alignment: right;
+                                    HorizontalLayout {
+                                        alignment: end;
+                                        spacing: 4px;
+
+                                        Text {
+                                            text: msg.timestamp;
+                                            color: msg.is-me ? #0b0f1499 : #ffffffaa;
+                                            font-size: 10px;
+                                            vertical-alignment: center;
+                                        }
+
+                                        if msg.is-me : Image {
+                                            source: @image-url("assets/icons/checkmarks.svg");
+                                            width: 14px;
+                                            height: 9px;
+                                            y: (parent.height - self.height) / 2;
+                                        }
                                     }
                                 }
                             }
@@ -502,30 +1027,54 @@ export component MainWindow inherits Window {
                     }
                 }
 
+                // BOTTOM INPUT DOCK (Matching Screenshot 5)
                 Rectangle {
-                    height: 60px;
+                    height: 68px;
                     background: Theme.surface;
-                    border-width: 1px;
-                    border-color: Theme.border;
+
+                    // Border top
+                    Rectangle {
+                        y: 0px;
+                        height: 1px;
+                        background: Theme.border;
+                    }
 
                     HorizontalLayout {
-                        padding-left: 12px;
-                        padding-right: 12px;
-                        spacing: 8px;
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 12px;
                         alignment: center;
 
+                        // Image attachment icon
+                        TouchArea {
+                            width: 36px;
+                            height: 36px;
+                            Rectangle {
+                                border-radius: Theme.radius-pill;
+                                background: parent.has-hover ? Theme.surface-high : transparent;
+                                Image {
+                                    source: @image-url("assets/icons/image_attach.svg");
+                                    width: 20px;
+                                    height: 20px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                            }
+                        }
+
+                        // Message input box
                         Rectangle {
                             horizontal-stretch: 1;
-                            height: 40px;
-                            border-radius: Theme.radius-md;
-                            background: Theme.background;
+                            height: 44px;
+                            border-radius: Theme.radius-lg;
+                            background: Theme.card;
                             border-width: 1px;
                             border-color: Theme.border;
 
                             TextInput {
-                                x: 10px;
-                                width: parent.width - 20px;
-                                height: 40px;
+                                x: 14px;
+                                width: parent.width - 28px;
+                                height: 44px;
                                 text <=> root.draft-text;
                                 color: Theme.text-primary;
                                 font-size: 13px;
@@ -539,9 +1088,10 @@ export component MainWindow inherits Window {
                             }
                         }
 
-                        send-touch := TouchArea {
-                            width: 40px;
-                            height: 40px;
+                        // Send paper plane button
+                        touch-send := TouchArea {
+                            width: 44px;
+                            height: 44px;
                             clicked => {
                                 if (root.draft-text != "") {
                                     root.send-message(root.draft-text);
@@ -551,125 +1101,16 @@ export component MainWindow inherits Window {
 
                             Rectangle {
                                 border-radius: Theme.radius-pill;
-                                background: send-touch.has-hover ? Theme.primary-dark : Theme.primary;
-                                Text {
-                                    text: "➤";
-                                    color: Theme.background;
-                                    font-size: 14px;
-                                    font-weight: 700;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
+                                background: touch-send.has-hover ? Theme.primary-dark : Theme.primary;
+
+                                Image {
+                                    source: @image-url("assets/icons/send.svg");
+                                    width: 18px;
+                                    height: 18px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
                                 }
                             }
-                        }
-                    }
-                }
-            }
-        }
-
-        // BOTTOM NAVIGATION BAR
-        if !root.is-in-chat : Rectangle {
-            height: 68px;
-            background: Theme.surface;
-
-            Rectangle {
-                y: 0px;
-                height: 1px;
-                background: Theme.border;
-            }
-
-            HorizontalLayout {
-                alignment: space-around;
-
-                nav-chats := TouchArea {
-                    width: 90px;
-                    clicked => {
-                        root.active-tab = "chats";
-                        root.tab-clicked("chats");
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 4px;
-                        Rectangle {
-                            width: 56px;
-                            height: 28px;
-                            border-radius: Theme.radius-pill;
-                            background: root.active-tab == "chats" ? Theme.indicator : transparent;
-                            Text {
-                                text: "💬";
-                                font-size: 14px;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-                        Text {
-                            text: "Chats";
-                            color: root.active-tab == "chats" ? Theme.primary : Theme.text-subtle;
-                            font-size: 11px;
-                            font-weight: root.active-tab == "chats" ? 700 : 500;
-                            horizontal-alignment: center;
-                        }
-                    }
-                }
-
-                nav-discover := TouchArea {
-                    width: 90px;
-                    clicked => {
-                        root.active-tab = "discover";
-                        root.tab-clicked("discover");
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 4px;
-                        Rectangle {
-                            width: 56px;
-                            height: 28px;
-                            border-radius: Theme.radius-pill;
-                            background: root.active-tab == "discover" ? Theme.indicator : transparent;
-                            Text {
-                                text: "🧭";
-                                font-size: 14px;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-                        Text {
-                            text: "Discover";
-                            color: root.active-tab == "discover" ? Theme.primary : Theme.text-subtle;
-                            font-size: 11px;
-                            font-weight: root.active-tab == "discover" ? 700 : 500;
-                            horizontal-alignment: center;
-                        }
-                    }
-                }
-
-                nav-profile := TouchArea {
-                    width: 90px;
-                    clicked => {
-                        root.active-tab = "profile";
-                        root.tab-clicked("profile");
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 4px;
-                        Rectangle {
-                            width: 56px;
-                            height: 28px;
-                            border-radius: Theme.radius-pill;
-                            background: root.active-tab == "profile" ? Theme.indicator : transparent;
-                            Text {
-                                text: "👤";
-                                font-size: 14px;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-                        Text {
-                            text: "Profile";
-                            color: root.active-tab == "profile" ? Theme.primary : Theme.text-subtle;
-                            font-size: 11px;
-                            font-weight: root.active-tab == "profile" ? 700 : 500;
-                            horizontal-alignment: center;
                         }
                     }
                 }

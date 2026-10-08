@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <path fill="currentColor" d="M12 2a1 1 0 011 1v1h1a5 5 0 015 5v7a4 4 0 01-4 4H9a4 4 0 01-4-4V9a5 5 0 015-5h1V3a1 1 0 011-1zm-4 9a1.5 1.5 0 100 3 1.5 1.5 0 000-3zm8 0a1.5 1.5 0 100 3 1.5 1.5 0 000-3zm-6.5 6a.75.75 0 000 1.5h5a.75.75 0 000-1.5h-5z"/>
+  <rect x="2" y="10" width="2" height="4" rx="1" fill="currentColor"/>
+  <rect x="20" y="10" width="2" height="4" rx="1" fill="currentColor"/>
+</svg>
