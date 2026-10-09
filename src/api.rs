@@ -73,6 +73,13 @@ impl SupabaseClient {
 
         if !resp.status().is_success() {
             let err_text = resp.text().await.unwrap_or_default();
+            if let Ok(err_json) = serde_json::from_str::<serde_json::Value>(&err_text) {
+                if let Some(msg) = err_json.get("error_description").or_else(|| err_json.get("msg")) {
+                    if let Some(s) = msg.as_str() {
+                        return Err(s.to_string().into());
+                    }
+                }
+            }
             return Err(format!("Login failed: {}", err_text).into());
         }
 
@@ -117,22 +124,38 @@ impl SupabaseClient {
 
         if !resp.status().is_success() {
             let err_text = resp.text().await.unwrap_or_default();
+            if let Ok(err_json) = serde_json::from_str::<serde_json::Value>(&err_text) {
+                if let Some(msg) = err_json.get("msg").or_else(|| err_json.get("error_description")) {
+                    if let Some(s) = msg.as_str() {
+                        return Err(s.to_string().into());
+                    }
+                }
+            }
             return Err(format!("Sign up failed: {}", err_text).into());
         }
 
-        let auth: AuthResponse = resp.json().await?;
-        let session = SessionData {
-            access_token: auth.access_token.clone(),
-            refresh_token: auth.refresh_token.clone(),
-            user_id: auth.user.id.clone(),
-            email: auth.user.email.clone(),
-        };
+        let val: serde_json::Value = resp.json().await?;
+        if let Some(tok) = val.get("access_token").and_then(|v| v.as_str()) {
+            let user_obj = val.get("user").unwrap_or(&val);
+            let user_id = user_obj.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let email_val = user_obj.get("email").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let refresh = val.get("refresh_token").and_then(|v| v.as_str()).map(|s| s.to_string());
 
-        *self.access_token.write().await = Some(session.access_token.clone());
-        *self.refresh_token.write().await = session.refresh_token.clone();
-        *self.user_id.write().await = Some(session.user_id.clone());
+            let session = SessionData {
+                access_token: tok.to_string(),
+                refresh_token: refresh,
+                user_id,
+                email: email_val,
+            };
+            self.set_session(&session).await;
+            return Ok(session);
+        }
 
-        Ok(session)
+        // Email confirmation is required by Supabase: try logging in directly
+        match self.login(email, pass).await {
+            Ok(sess) => Ok(sess),
+            Err(_) => Err("Account created! Please check your email to confirm, then sign in.".into()),
+        }
     }
 
     pub async fn fetch_user_with_token(
@@ -262,8 +285,12 @@ impl SupabaseClient {
                         html
                     );
                     let _ = socket.write_all(response.as_bytes()).await;
-                } else if path.starts_with("/auth/token?") {
-                    let query = &path["/auth/token?".len()..];
+                } else if path.starts_with("/auth/token?") || path.starts_with("/auth/forward?") {
+                    let query = if path.starts_with("/auth/token?") {
+                        &path["/auth/token?".len()..]
+                    } else {
+                        &path["/auth/forward?".len()..]
+                    };
                     let mut access_token = String::new();
                     let mut refresh_token = String::new();
 
@@ -275,6 +302,21 @@ impl SupabaseClient {
                                 access_token = decoded_val;
                             } else if k == "refresh_token" {
                                 refresh_token = decoded_val;
+                            } else if k == "url" {
+                                let full = decoded_val;
+                                for p in full.split(&['?', '#'][..]) {
+                                    for sub in p.split('&') {
+                                        let mut sub_kv = sub.splitn(2, '=');
+                                        if let (Some(sk), Some(sv)) = (sub_kv.next(), sub_kv.next()) {
+                                            let dec = urlencoding_decode(sv);
+                                            if sk == "access_token" {
+                                                access_token = dec;
+                                            } else if sk == "refresh_token" {
+                                                refresh_token = dec;
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -894,7 +936,7 @@ pub fn parse_hex_color(hex: &str) -> slint::Color {
     slint::Color::from_argb_u8(255, 30, 37, 48) // Default dark grey
 }
 
-fn urlencoding_decode(s: &str) -> String {
+pub fn urlencoding_decode(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars();
     while let Some(ch) = chars.next() {
@@ -913,5 +955,17 @@ fn urlencoding_decode(s: &str) -> String {
         }
     }
     result
+}
+
+pub fn urlencoding_encode(s: &str) -> String {
+    let mut res = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b'~' {
+            res.push(b as char);
+        } else {
+            res.push_str(&format!("%{:02X}", b));
+        }
+    }
+    res
 }
 

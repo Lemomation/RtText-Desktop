@@ -57,24 +57,11 @@ fn trim_working_set() {
 }
 
 fn create_tray_icon() -> Result<tray_icon::Icon, Box<dyn std::error::Error>> {
-    let width: u32 = 32;
-    let height: u32 = 32;
-    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
-
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - 16.0;
-            let dy = y as f32 - 16.0;
-            let dist = (dx * dx + dy * dy).sqrt();
-
-            if dist <= 14.0 {
-                // Amber accent: #FBBF24 (RGB: 251, 191, 36)
-                rgba.extend_from_slice(&[251, 191, 36, 255]);
-            } else {
-                rgba.extend_from_slice(&[0, 0, 0, 0]);
-            }
-        }
-    }
+    let img_bytes = include_bytes!("../assets/icons/bead.png");
+    let img = image::load_from_memory(img_bytes)?.to_rgba8();
+    let resized = image::imageops::resize(&img, 32, 32, image::imageops::FilterType::Lanczos3);
+    let (width, height) = resized.dimensions();
+    let rgba = resized.into_raw();
 
     Ok(tray_icon::Icon::from_rgba(rgba, width, height)?)
 }
@@ -122,8 +109,44 @@ fn save_accent(accent_id: &str, accent_hex: &str) {
     let _ = std::fs::write(dir.join("settings.json"), data.to_string());
 }
 
+#[cfg(target_os = "windows")]
+fn register_custom_protocol() {
+    if let Ok(exe_path) = std::env::current_exe() {
+        let exe_str = exe_path.to_string_lossy().to_string();
+        let cmd = format!("\"{}\" \"%1\"", exe_str);
+
+        let _ = std::process::Command::new("reg")
+            .args(["add", "HKCU\\Software\\Classes\\io.supabase.flutterdeepauth", "/ve", "/d", "URL:RtText Protocol", "/f"])
+            .status();
+        let _ = std::process::Command::new("reg")
+            .args(["add", "HKCU\\Software\\Classes\\io.supabase.flutterdeepauth", "/v", "URL Protocol", "/d", "", "/f"])
+            .status();
+        let _ = std::process::Command::new("reg")
+            .args(["add", "HKCU\\Software\\Classes\\io.supabase.flutterdeepauth\\shell\\open\\command", "/ve", "/d", &cmd, "/f"])
+            .status();
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("RtText Desktop initializing, backend: {}", config::CONFIG.supabase_url);
+
+    let args: Vec<String> = std::env::args().collect();
+    for arg in &args[1..] {
+        if arg.starts_with("io.supabase.flutterdeepauth://") {
+            if let Ok(mut stream) = std::net::TcpStream::connect("127.0.0.1:54321") {
+                use std::io::Write;
+                let req = format!(
+                    "GET /auth/forward?url={} HTTP/1.1\r\nHost: localhost:54321\r\nConnection: close\r\n\r\n",
+                    api::urlencoding_encode(arg)
+                );
+                let _ = stream.write_all(req.as_bytes());
+            }
+            return Ok(());
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    register_custom_protocol();
 
     #[cfg(target_os = "windows")]
     if !check_single_instance() {
@@ -623,10 +646,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Err(e) => {
                         let err_msg = e.to_string();
-                        let display_err = if err_msg.contains("Invalid login") || err_msg.contains("400") {
-                            "Invalid email or password. Please check your credentials."
+                        let display_err = if err_msg.contains("Invalid login") {
+                            "Invalid email or password. Please check your credentials.".to_string()
                         } else {
-                            "Login failed. Please check network and try again."
+                            err_msg
                         };
                         let w_clone = window_weak.clone();
                         let _ = slint::invoke_from_event_loop(move || {
@@ -683,9 +706,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => {
                         let err_msg = e.to_string();
                         let display_err = if err_msg.contains("already registered") {
-                            "An account with this email already exists."
+                            "An account with this email already exists.".to_string()
                         } else {
-                            "Could not create account. Please check inputs."
+                            err_msg
                         };
                         let w_clone = window_weak.clone();
                         let _ = slint::invoke_from_event_loop(move || {
