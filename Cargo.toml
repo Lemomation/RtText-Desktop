@@ -1,6 +1,6 @@
 [package]
 name = "rttext"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2021"
 authors = ["Lemomation"]
 description = "Native Windows desktop client for RtText with 1:1 Material 3 UI and ultra-low RAM usage."

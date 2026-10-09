@@ -341,6 +341,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let conv_to_dm: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
     let dm_to_conv: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
     let conv_is_group: Arc<RwLock<HashMap<String, bool>>> = Arc::new(RwLock::new(HashMap::new()));
+    let all_bots_cache: Arc<RwLock<Vec<RawBotCard>>> = Arc::new(RwLock::new(Vec::new()));
+    let pending_bot_pfp: Arc<RwLock<Option<(Vec<u8>, String)>>> = Arc::new(RwLock::new(None));
 
     // Restore saved accent if available
     if let Some((acc_id, acc_hex)) = load_saved_accent() {
@@ -389,6 +391,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let conv_to_dm_clone = conv_to_dm.clone();
         let dm_to_conv_clone = dm_to_conv.clone();
         let conv_is_group_clone = conv_is_group.clone();
+        let all_bots_clone = all_bots_cache.clone();
 
         Arc::new(move |uid: String| {
             let client = client.clone();
@@ -400,6 +403,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let conv_to_dm = conv_to_dm_clone.clone();
             let dm_to_conv = dm_to_conv_clone.clone();
             let conv_is_group = conv_is_group_clone.clone();
+            let all_bots = all_bots_clone.clone();
 
             tokio::spawn(async move {
                 // 1. Profile & Avatar
@@ -450,6 +454,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         });
                     }
 
+                    *all_bots.write().await = bot_items.clone();
+
                     let w_clone = window_weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = w_clone.upgrade() {
@@ -471,55 +477,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .collect();
                             let model = std::rc::Rc::new(slint::VecModel::from(items));
                             w.set_bot_directory(model.into());
-                        }
-                    });
-                }
 
-                // 3. People Directory (from public.people view)
-                if let Ok(people) = client.fetch_people().await {
-                    let mut people_items = Vec::new();
-                    for p in people {
-                        if p.id == uid { continue; } // Don't list self in people
-                        let mut avatar_img = None;
-                        if let Some(a_url) = p.avatar_url.as_deref() {
-                            if let Some(bytes) = client.fetch_and_cache_image(a_url).await {
-                                avatar_img = decode_image_rgba(&bytes);
-                            }
-                        }
-
-                        let uname = p.username.unwrap_or_else(|| "User".into());
-                        let letter = uname.chars().next().unwrap_or('U').to_uppercase().to_string();
-
-                        people_items.push(RawPersonCard {
-                            id: p.id,
-                            username: uname,
-                            subtitle: "Joined community".into(),
-                            avatar_letter: letter,
-                            avatar_img,
-                        });
-                    }
-
-                    let w_clone = window_weak.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(w) = w_clone.upgrade() {
-                            let items: Vec<PersonCardItem> = people_items
-                                .into_iter()
-                                .map(|p| {
-                                    let has_avatar = p.avatar_img.is_some();
-                                    let img = p.avatar_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
-                                    PersonCardItem {
-                                        id: p.id.into(),
-                                        username: p.username.into(),
-                                        subtitle: p.subtitle.into(),
-                                        avatar_letter: p.avatar_letter.into(),
-                                        has_avatar,
-                                        avatar_image: img,
-                                        is_online: false,
-                                    }
-                                })
-                                .collect();
-                            let model = std::rc::Rc::new(slint::VecModel::from(items));
-                            w.set_people_directory(model.into());
+                            // People directory is hidden/empty by default; only populated via live search
+                            let empty_people = std::rc::Rc::new(slint::VecModel::<PersonCardItem>::default());
+                            w.set_people_directory(empty_people.into());
                         }
                     });
                 }
@@ -645,7 +606,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let items = raw_to_message_items(raw_items);
                                 let model = std::rc::Rc::new(slint::VecModel::from(items));
                                 w.set_messages(model.into());
-                                w.set_chat_viewport_y(-100000.0);
+                                w.invoke_scroll_to_bottom();
                             }
                         });
                     }
@@ -941,7 +902,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let items = raw_to_message_items(raw_items);
                             let model = std::rc::Rc::new(slint::VecModel::from(items));
                             w.set_messages(model.into());
-                            w.set_chat_viewport_y(-100000.0);
+                            w.invoke_scroll_to_bottom();
                         }
                     });
                 }
@@ -1058,7 +1019,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                                 let model = std::rc::Rc::new(slint::VecModel::from(msgs));
                                 w.set_messages(model.into());
-                                w.set_chat_viewport_y(-100000.0);
+                                w.invoke_scroll_to_bottom();
                             }
                         });
 
@@ -1135,7 +1096,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let items = raw_to_message_items(raw_items);
                         let model = std::rc::Rc::new(slint::VecModel::from(items));
                         w.set_messages(model.into());
-                        w.set_chat_viewport_y(-100000.0);
+                        w.invoke_scroll_to_bottom();
                     }
                 });
             });
@@ -1173,7 +1134,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
                 let model = std::rc::Rc::new(slint::VecModel::from(msgs));
                 w.set_messages(model.into());
-                w.set_chat_viewport_y(-100000.0);
+                w.invoke_scroll_to_bottom();
             }
 
             let client = client.clone();
@@ -1221,7 +1182,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         });
                                         let model = std::rc::Rc::new(slint::VecModel::from(msgs));
                                         w.set_messages(model.into());
-                                        w.set_chat_viewport_y(-100000.0);
+                                        w.invoke_scroll_to_bottom();
 
                                         if let Some(beads) = reply.beads {
                                             w.set_bead_balance(beads);
@@ -1259,7 +1220,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     });
                                     let model = std::rc::Rc::new(slint::VecModel::from(msgs));
                                     w.set_messages(model.into());
-                                    w.set_chat_viewport_y(-100000.0);
+                                    w.invoke_scroll_to_bottom();
                                 }
                             });
                         }
@@ -1269,7 +1230,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // BOT PROFILE & BOT EDITOR CALLBACKS
+    // BOT PROFILE, EDITOR & AVATAR CALLBACKS
     {
         let client = client.clone();
         let window_weak = main_window.as_weak();
@@ -1320,10 +1281,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let client = client.clone();
         let window_weak = main_window.as_weak();
+        let pending_pfp = pending_bot_pfp.clone();
 
         main_window.on_open_bot_editor(move |id, is_edit, name, bio, desc, prompt, color| {
             let client = client.clone();
             let window_weak = window_weak.clone();
+            let pending_pfp = pending_pfp.clone();
             let bot_id = id.to_string();
             let e_name = name.to_string();
             let e_bio = bio.to_string();
@@ -1332,22 +1295,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let e_color = color.to_string();
 
             tokio::spawn(async move {
-                let final_prompt = if is_edit && e_prompt.is_empty() && !bot_id.is_empty() {
-                    client.fetch_bot_by_id(&bot_id).await.ok().flatten().and_then(|b| b.sys_prompt).unwrap_or_default()
-                } else {
-                    e_prompt
-                };
+                *pending_pfp.write().await = None;
+
+                let mut existing_pfp_img = None;
+                let mut existing_pfp_url = String::new();
+                let mut actual_name = e_name.clone();
+                let mut actual_bio = e_bio.clone();
+                let mut actual_desc = e_desc.clone();
+                let mut actual_prompt = e_prompt.clone();
+                let mut actual_color = e_color.clone();
+
+                if is_edit && !bot_id.is_empty() {
+                    if let Ok(Some(bot)) = client.fetch_bot_by_id(&bot_id).await {
+                        actual_name = bot.name;
+                        actual_bio = bot.bio.unwrap_or_default();
+                        actual_desc = bot.description.unwrap_or_default();
+                        actual_prompt = bot.sys_prompt.unwrap_or_default();
+                        actual_color = bot.bubble_color.unwrap_or_else(|| "#FB7185".into());
+                        if let Some(purl) = bot.pfp_url {
+                            existing_pfp_url = purl.clone();
+                            if let Some(bytes) = client.fetch_and_cache_image(&purl).await {
+                                existing_pfp_img = decode_image_rgba(&bytes);
+                            }
+                        }
+                    }
+                }
+
+                let letter = actual_name.chars().next().unwrap_or('B').to_uppercase().to_string();
+                let has_pfp = existing_pfp_img.is_some();
 
                 let w_clone = window_weak.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = w_clone.upgrade() {
+                        let img = existing_pfp_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
                         w.set_bot_editor_id(bot_id.into());
                         w.set_bot_editor_is_edit(is_edit);
-                        w.set_bot_editor_name(e_name.into());
-                        w.set_bot_editor_bio(e_bio.into());
-                        w.set_bot_editor_desc(e_desc.into());
-                        w.set_bot_editor_sys_prompt(final_prompt.into());
-                        w.set_bot_editor_color_hex(e_color.into());
+                        w.set_bot_editor_name(actual_name.into());
+                        w.set_bot_editor_bio(actual_bio.into());
+                        w.set_bot_editor_desc(actual_desc.into());
+                        w.set_bot_editor_sys_prompt(actual_prompt.into());
+                        w.set_bot_editor_color_hex(actual_color.into());
+                        w.set_bot_editor_has_pfp(has_pfp);
+                        w.set_bot_editor_pfp_image(img);
+                        w.set_bot_editor_pfp_url(existing_pfp_url.into());
+                        w.set_bot_editor_avatar_letter(letter.into());
                         w.set_show_bot_editor(true);
                     }
                 });
@@ -1356,14 +1347,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
+        let window_weak = main_window.as_weak();
+        let pending_pfp = pending_bot_pfp.clone();
+
+        main_window.on_pick_bot_avatar(move || {
+            let window_weak = window_weak.clone();
+            let pending_pfp = pending_pfp.clone();
+
+            let file_opt = rfd::FileDialog::new()
+                .add_filter("Image", &["png", "jpg", "jpeg", "webp"])
+                .set_title("Select Bot Avatar")
+                .pick_file();
+
+            if let Some(file_path) = file_opt {
+                if let Ok(bytes) = std::fs::read(&file_path) {
+                    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("jpg").to_string();
+                    let decoded_opt = decode_image_rgba(&bytes);
+
+                    tokio::spawn(async move {
+                        *pending_pfp.write().await = Some((bytes, ext));
+                    });
+
+                    if let Some(d) = decoded_opt {
+                        let w_clone = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w_clone.upgrade() {
+                                w.set_bot_editor_has_pfp(true);
+                                w.set_bot_editor_pfp_image(d.to_slint_image());
+                            }
+                        });
+                    }
+                }
+            }
+        });
+    }
+
+    {
         let client = client.clone();
         let my_uid = my_user_id.clone();
         let load_fn = load_app_data.clone();
+        let pending_pfp = pending_bot_pfp.clone();
 
         main_window.on_save_bot(move |id, is_edit, name, bio, desc, prompt, color| {
             let client = client.clone();
             let my_uid = my_uid.clone();
             let load_fn = load_fn.clone();
+            let pending_pfp = pending_pfp.clone();
             let bot_id = id.to_string();
             let b_name = name.to_string();
             let b_bio = if bio.is_empty() { None } else { Some(bio.to_string()) };
@@ -1372,6 +1401,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let b_color = if color.is_empty() { None } else { Some(color.to_string()) };
 
             tokio::spawn(async move {
+                let maybe_upload = {
+                    let mut p = pending_pfp.write().await;
+                    p.take()
+                };
+
+                let mut uploaded_url = None;
+                if let Some((bytes, ext)) = maybe_upload {
+                    if let Ok(purl) = client.upload_bot_pfp(bytes, &ext).await {
+                        uploaded_url = Some(purl);
+                    }
+                }
+
                 let res = if is_edit {
                     client.update_bot(
                         &bot_id,
@@ -1379,6 +1420,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         &b_prompt,
                         b_bio.as_deref(),
                         b_desc.as_deref(),
+                        uploaded_url.as_deref(),
                         b_color.as_deref(),
                     ).await
                 } else {
@@ -1387,7 +1429,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         &b_prompt,
                         b_bio.as_deref(),
                         b_desc.as_deref(),
-                        None,
+                        uploaded_url.as_deref(),
                         b_color.as_deref(),
                     ).await
                 };
@@ -1416,6 +1458,119 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let uid = my_uid.read().await.clone();
                     load_fn(uid);
                 }
+            });
+        });
+    }
+
+    // SEARCH QUERY CHANGED CALLBACK
+    {
+        let client = client.clone();
+        let window_weak = main_window.as_weak();
+        let all_bots = all_bots_cache.clone();
+
+        main_window.on_search_query_changed(move |query| {
+            let client = client.clone();
+            let window_weak = window_weak.clone();
+            let all_bots = all_bots.clone();
+            let q = query.to_string();
+
+            tokio::spawn(async move {
+                let q_trimmed = q.trim().to_string();
+
+                // 1. Live People Search via Supabase API ilike prefix
+                if q_trimmed.is_empty() {
+                    let w_clone = window_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = w_clone.upgrade() {
+                            let empty = std::rc::Rc::new(slint::VecModel::<PersonCardItem>::default());
+                            w.set_people_directory(empty.into());
+                        }
+                    });
+                } else {
+                    if let Ok(people) = client.search_people(&q_trimmed).await {
+                        let mut raw_people = Vec::new();
+                        for p in people {
+                            let mut avatar_img = None;
+                            if let Some(a_url) = p.avatar_url.as_deref() {
+                                if let Some(bytes) = client.fetch_and_cache_image(a_url).await {
+                                    avatar_img = decode_image_rgba(&bytes);
+                                }
+                            }
+                            let uname = p.username.unwrap_or_else(|| "User".into());
+                            let letter = uname.chars().next().unwrap_or('U').to_uppercase().to_string();
+                            raw_people.push(RawPersonCard {
+                                id: p.id,
+                                username: uname,
+                                subtitle: "Member of RtText".into(),
+                                avatar_letter: letter,
+                                avatar_img,
+                            });
+                        }
+
+                        let w_clone = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w_clone.upgrade() {
+                                let items: Vec<PersonCardItem> = raw_people
+                                    .into_iter()
+                                    .map(|p| {
+                                        let has_avatar = p.avatar_img.is_some();
+                                        let img = p.avatar_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+                                        PersonCardItem {
+                                            id: p.id.into(),
+                                            username: p.username.into(),
+                                            subtitle: p.subtitle.into(),
+                                            avatar_letter: p.avatar_letter.into(),
+                                            has_avatar,
+                                            avatar_image: img,
+                                            is_online: false,
+                                        }
+                                    })
+                                    .collect();
+                                let model = std::rc::Rc::new(slint::VecModel::from(items));
+                                w.set_people_directory(model.into());
+                            }
+                        });
+                    }
+                }
+
+                // 2. Characters In-Memory Filter
+                let bots = all_bots.read().await.clone();
+                let q_lower = q_trimmed.to_lowercase();
+                let filtered: Vec<_> = if q_lower.is_empty() {
+                    bots
+                } else {
+                    bots.into_iter()
+                        .filter(|b| {
+                            b.name.to_lowercase().contains(&q_lower)
+                                || b.bio.to_lowercase().contains(&q_lower)
+                                || b.description.to_lowercase().contains(&q_lower)
+                        })
+                        .collect()
+                };
+
+                let w_clone = window_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = w_clone.upgrade() {
+                        let items: Vec<BotCardItem> = filtered
+                            .into_iter()
+                            .map(|b| {
+                                let has_avatar = b.avatar_img.is_some();
+                                let img = b.avatar_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+                                BotCardItem {
+                                    id: b.id.into(),
+                                    name: b.name.into(),
+                                    bio: b.bio.into(),
+                                    avatar_letter: b.avatar_letter.into(),
+                                    has_avatar,
+                                    avatar_image: img,
+                                    bubble_color: parse_hex_color(&b.bubble_color),
+                                }
+                            })
+                            .collect();
+                        let model = std::rc::Rc::new(slint::VecModel::from(items));
+                        w.set_bot_directory(model.into());
+                    }
+                });
             });
         });
     }
@@ -1491,7 +1646,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let items = raw_to_message_items(raw_items);
                             let model = std::rc::Rc::new(slint::VecModel::from(items));
                             w.set_messages(model.into());
-                            w.set_chat_viewport_y(-100000.0);
+                            w.invoke_scroll_to_bottom();
                         }
                     });
                 }
@@ -1611,7 +1766,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let items = raw_to_message_items(raw_items);
                             let model = std::rc::Rc::new(slint::VecModel::from(items));
                             w.set_messages(model.into());
-                            w.set_chat_viewport_y(-100000.0);
+                            w.invoke_scroll_to_bottom();
                         }
                     });
                 }
@@ -1746,7 +1901,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             let items = raw_to_message_items(raw_items);
                                             let model = std::rc::Rc::new(slint::VecModel::from(items));
                                             w.set_messages(model.into());
-                                            w.set_chat_viewport_y(-100000.0);
+                                            w.invoke_scroll_to_bottom();
                                         }
                                     });
                                 }

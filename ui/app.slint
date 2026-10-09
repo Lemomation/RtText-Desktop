@@ -94,14 +94,11 @@ export component MainWindow inherits Window {
     in-out property <string> draft-text: "";
 
     // 6. App Updates State
-    in-out property <string> app-version: "v0.3.5";
+    in-out property <string> app-version: "v0.3.6";
     in-out property <string> update-status: "idle"; // "idle", "checking", "up-to-date", "available", "downloading"
     in-out property <string> latest-version-tag: "";
 
-    // 7. Chat Viewport Scroll
-    in-out property <length> chat-viewport-y: 0px;
-
-    // 8. Profile & Editor Modals
+    // 7. Profile & Editor Modals
     in-out property <bool> show-bot-profile: false;
     in-out property <string> bot-profile-id: "";
     in-out property <string> bot-profile-name: "";
@@ -121,6 +118,10 @@ export component MainWindow inherits Window {
     in-out property <string> bot-editor-desc: "";
     in-out property <string> bot-editor-sys-prompt: "";
     in-out property <string> bot-editor-color-hex: "#F59E0B";
+    in-out property <bool> bot-editor-has-pfp: false;
+    in-out property <image> bot-editor-pfp-image;
+    in-out property <string> bot-editor-pfp-url: "";
+    in-out property <string> bot-editor-avatar-letter: "B";
 
     in-out property <bool> show-peer-profile: false;
     in-out property <string> peer-profile-id: "";
@@ -131,7 +132,7 @@ export component MainWindow inherits Window {
     in-out property <image> peer-profile-avatar-image;
     in-out property <bool> peer-profile-is-online: false;
 
-    // 9. Data Models
+    // 8. Data Models
     in-out property <[ConversationItem]> conversations: [];
     in-out property <[MessageItem]> messages: [];
     in-out property <[BotCardItem]> bot_directory: [];
@@ -143,6 +144,7 @@ export component MainWindow inherits Window {
     callback send-message(string);
     callback attach-image-clicked();
     callback accent-changed(string, color);
+    callback search-query-changed(string);
 
     // Auth Callbacks
     callback google-login-requested();
@@ -156,6 +158,7 @@ export component MainWindow inherits Window {
     // Profile & Bot Management Callbacks
     callback open-bot-profile(string);
     callback open-bot-editor(string, bool, string, string, string, string, string);
+    callback pick-bot-avatar();
     callback save-bot(string, bool, string, string, string, string, string);
     callback delete-bot(string);
     callback bot-start-chat(string);
@@ -166,6 +169,14 @@ export component MainWindow inherits Window {
     // Updates Callbacks
     callback check-updates-requested();
     callback perform-update-requested();
+
+    public function scroll-to-bottom() {
+        if (msg-flick.viewport-height > msg-flick.height) {
+            msg-flick.viewport-y = msg-flick.height - msg-flick.viewport-height;
+        } else {
+            msg-flick.viewport-y = 0px;
+        }
+    }
 
     // ==========================================
     // VIEW 1: AUTH SCREEN (WHEN NOT LOGGED IN)
@@ -928,6 +939,7 @@ export component MainWindow inherits Window {
                                     font-size: 13px;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;
+                                    edited => { root.search-query-changed(self.text); }
                                 }
                             }
                         }
@@ -1063,7 +1075,21 @@ export component MainWindow inherits Window {
                                 }
                             }
 
-                            if root.search-query != "" : VerticalLayout {
+                            if root.search-query != "" && root.people_directory.length == 0 : VerticalLayout {
+                                alignment: center;
+                                spacing: 8px;
+                                padding-top: 48px;
+                                padding-bottom: 48px;
+
+                                Text {
+                                    text: "No people found matching \"" + root.search-query + "\"";
+                                    color: Theme.text-subtle;
+                                    font-size: 13px;
+                                    horizontal-alignment: center;
+                                }
+                            }
+
+                            if root.search-query != "" && root.people_directory.length > 0 : VerticalLayout {
                                 spacing: 10px;
 
                                 for person in root.people_directory : touch-person := TouchArea {
@@ -1570,7 +1596,6 @@ export component MainWindow inherits Window {
                 // 2. MESSAGES STREAM
                 msg-flick := Flickable {
                     vertical-stretch: 1;
-                    viewport-y <=> root.chat-viewport-y;
 
                     VerticalLayout {
                         padding-left: 18px;
@@ -1578,7 +1603,6 @@ export component MainWindow inherits Window {
                         padding-top: 18px;
                         padding-bottom: 24px;
                         spacing: 12px;
-                        alignment: end;
 
                         for msg in root.messages : HorizontalLayout {
                             alignment: msg.is-separator ? center : (msg.is-me ? end : start);
@@ -2013,7 +2037,7 @@ export component MainWindow inherits Window {
         y: 0px;
         width: 100%;
         height: 100%;
-        background: #000000aa;
+        background: #000000bb;
 
         TouchArea {
             clicked => { root.show-bot-editor = false; }
@@ -2026,17 +2050,19 @@ export component MainWindow inherits Window {
                 alignment: center;
 
                 Rectangle {
-                    width: 500px;
+                    width: 520px;
+                    max-height: root.height * 0.90;
                     border-radius: 24px;
                     background: Theme.surface;
                     border-width: 1px;
                     border-color: Theme.border;
+                    clip: true;
 
                     VerticalLayout {
-                        padding: 24px;
-                        spacing: 14px;
+                        padding: 20px;
+                        spacing: 12px;
 
-                        // Header
+                        // 1. Header (Fixed)
                         HorizontalLayout {
                             alignment: space-between;
                             Text {
@@ -2064,101 +2090,185 @@ export component MainWindow inherits Window {
                             }
                         }
 
-                        // Form field: Name
-                        VerticalLayout {
-                            spacing: 4px;
-                            Text { text: "Name *"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; }
-                            Rectangle {
-                                height: 40px;
-                                border-radius: 10px;
-                                background: Theme.surface-high;
-                                border-width: 1px;
-                                border-color: Theme.border;
-                                TextInput {
-                                    x: 12px;
-                                    width: parent.width - 24px;
-                                    text <=> root.bot-editor-name;
-                                    color: Theme.text-primary;
-                                    font-size: 13px;
-                                    vertical-alignment: center;
+                        // 2. Scrollable Body
+                        bot-editor-flick := Flickable {
+                            vertical-stretch: 1;
+
+                            VerticalLayout {
+                                spacing: 14px;
+                                padding-right: 4px;
+
+                                // Avatar Picker Circle
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 6px;
+
+                                    HorizontalLayout {
+                                        alignment: center;
+
+                                        TouchArea {
+                                            width: 76px;
+                                            height: 76px;
+                                            clicked => { root.pick-bot-avatar(); }
+
+                                            Rectangle {
+                                                width: 76px;
+                                                height: 76px;
+                                                border-radius: 38px;
+                                                background: Theme.surface-high;
+                                                clip: true;
+                                                border-width: 2px;
+                                                border-color: parent.has-hover ? root.user-accent-color : Theme.border;
+
+                                                if root.bot-editor-has-pfp : Image {
+                                                    source: root.bot-editor-pfp-image;
+                                                    width: 76px;
+                                                    height: 76px;
+                                                    image-fit: cover;
+                                                }
+
+                                                if !root.bot-editor-has-pfp : Text {
+                                                    text: root.bot-editor-avatar-letter;
+                                                    color: Theme.text-primary;
+                                                    font-size: 26px;
+                                                    font-weight: 800;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+
+                                                // Camera Badge Overlay
+                                                Rectangle {
+                                                    x: 48px;
+                                                    y: 48px;
+                                                    width: 24px;
+                                                    height: 24px;
+                                                    border-radius: 12px;
+                                                    background: root.user-accent-color;
+                                                    HorizontalLayout {
+                                                        alignment: center;
+                                                        Text {
+                                                            text: "📷";
+                                                            font-size: 11px;
+                                                            vertical-alignment: center;
+                                                            horizontal-alignment: center;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "Click to upload avatar";
+                                        color: Theme.text-subtle;
+                                        font-size: 11px;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+
+                                // Form field: Name
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    Text { text: "Name *"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; }
+                                    Rectangle {
+                                        height: 40px;
+                                        border-radius: 10px;
+                                        background: Theme.surface-high;
+                                        border-width: 1px;
+                                        border-color: Theme.border;
+                                        TextInput {
+                                            x: 12px;
+                                            width: parent.width - 24px;
+                                            text <=> root.bot-editor-name;
+                                            color: Theme.text-primary;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                // Form field: Tagline / Bio
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    Text { text: "Tagline / Short Bio"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; }
+                                    Rectangle {
+                                        height: 40px;
+                                        border-radius: 10px;
+                                        background: Theme.surface-high;
+                                        border-width: 1px;
+                                        border-color: Theme.border;
+                                        TextInput {
+                                            x: 12px;
+                                            width: parent.width - 24px;
+                                            text <=> root.bot-editor-bio;
+                                            color: Theme.text-primary;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                // Form field: Description
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    Text { text: "Description (Personality / Background)"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; }
+                                    Rectangle {
+                                        height: 72px;
+                                        border-radius: 10px;
+                                        background: Theme.surface-high;
+                                        border-width: 1px;
+                                        border-color: Theme.border;
+                                        TextInput {
+                                            x: 12px;
+                                            y: 8px;
+                                            width: parent.width - 24px;
+                                            height: parent.height - 16px;
+                                            single-line: false;
+                                            wrap: word-wrap;
+                                            text <=> root.bot-editor-desc;
+                                            color: Theme.text-primary;
+                                            font-size: 13px;
+                                        }
+                                    }
+                                }
+
+                                // Form field: System Prompt
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    Text { text: "System Prompt (AI Persona Instructions) *"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; }
+                                    Rectangle {
+                                        height: 120px;
+                                        border-radius: 10px;
+                                        background: Theme.surface-high;
+                                        border-width: 1px;
+                                        border-color: Theme.border;
+                                        TextInput {
+                                            x: 12px;
+                                            y: 8px;
+                                            width: parent.width - 24px;
+                                            height: parent.height - 16px;
+                                            single-line: false;
+                                            wrap: word-wrap;
+                                            text <=> root.bot-editor-sys-prompt;
+                                            color: Theme.text-primary;
+                                            font-size: 13px;
+                                        }
+                                    }
                                 }
                             }
                         }
 
-                        // Form field: Bio (tagline)
-                        VerticalLayout {
-                            spacing: 4px;
-                            Text { text: "Tagline / Short Bio"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; }
-                            Rectangle {
-                                height: 40px;
-                                border-radius: 10px;
-                                background: Theme.surface-high;
-                                border-width: 1px;
-                                border-color: Theme.border;
-                                TextInput {
-                                    x: 12px;
-                                    width: parent.width - 24px;
-                                    text <=> root.bot-editor-bio;
-                                    color: Theme.text-primary;
-                                    font-size: 13px;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
-
-                        // Form field: Description
-                        VerticalLayout {
-                            spacing: 4px;
-                            Text { text: "Description (Personality / Background)"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; }
-                            Rectangle {
-                                height: 50px;
-                                border-radius: 10px;
-                                background: Theme.surface-high;
-                                border-width: 1px;
-                                border-color: Theme.border;
-                                TextInput {
-                                    x: 12px;
-                                    width: parent.width - 24px;
-                                    text <=> root.bot-editor-desc;
-                                    color: Theme.text-primary;
-                                    font-size: 13px;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
-
-                        // Form field: System Prompt
-                        VerticalLayout {
-                            spacing: 4px;
-                            Text { text: "System Prompt (AI Persona Instructions) *"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; }
-                            Rectangle {
-                                height: 64px;
-                                border-radius: 10px;
-                                background: Theme.surface-high;
-                                border-width: 1px;
-                                border-color: Theme.border;
-                                TextInput {
-                                    x: 12px;
-                                    width: parent.width - 24px;
-                                    text <=> root.bot-editor-sys-prompt;
-                                    color: Theme.text-primary;
-                                    font-size: 13px;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
-
-                        // Action Buttons: Cancel & Save
+                        // 3. Footer (Fixed)
                         HorizontalLayout {
                             spacing: 12px;
-                            padding-top: 8px;
+                            padding-top: 4px;
 
                             TouchArea {
                                 horizontal-stretch: 1;
-                                height: 42px;
+                                height: 40px;
                                 clicked => { root.show-bot-editor = false; }
                                 Rectangle {
-                                    border-radius: 21px;
+                                    border-radius: 20px;
                                     background: Theme.surface-high;
                                     border-width: 1px;
                                     border-color: Theme.border;
@@ -2177,7 +2287,7 @@ export component MainWindow inherits Window {
 
                             TouchArea {
                                 horizontal-stretch: 1;
-                                height: 42px;
+                                height: 40px;
                                 clicked => {
                                     if (root.bot-editor-name != "") {
                                         root.save-bot(
@@ -2193,7 +2303,7 @@ export component MainWindow inherits Window {
                                     }
                                 }
                                 Rectangle {
-                                    border-radius: 21px;
+                                    border-radius: 20px;
                                     background: root.bot-editor-name != "" ? root.user-accent-color : #1e2633;
                                     HorizontalLayout {
                                         alignment: center;

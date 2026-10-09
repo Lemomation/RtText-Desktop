@@ -458,6 +458,39 @@ impl SupabaseClient {
         Ok(people)
     }
 
+    pub async fn search_people(&self, query: &str) -> Result<Vec<DbPerson>, Box<dyn std::error::Error + Send + Sync>> {
+        let q = query.trim();
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+        let token = self.get_token().await;
+        let uid = self.get_user_id().await.unwrap_or_default();
+        let url = format!(
+            "{}/rest/v1/people?username=ilike.{}%25&id=neq.{}&select=*&order=username.asc&limit=20",
+            CONFIG.supabase_url,
+            urlencoding_encode(q),
+            uid
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .headers(self.default_headers(token.as_deref()))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            return Ok(Vec::new());
+        }
+
+        let people: Vec<DbPerson> = resp.json().await.unwrap_or_default();
+        let mut cache = self.people_cache.write().await;
+        for p in &people {
+            cache.insert(p.id.clone(), p.clone());
+        }
+        Ok(people)
+    }
+
     pub async fn fetch_bots(&self) -> Result<Vec<DbBot>, Box<dyn std::error::Error + Send + Sync>> {
         let token = self.get_token().await;
         let url = format!("{}/rest/v1/public_bots?select=*&order=created_at.asc", CONFIG.supabase_url);
@@ -899,6 +932,51 @@ impl SupabaseClient {
         created.into_iter().next().ok_or_else(|| "No bot returned".into())
     }
 
+    pub async fn upload_bot_pfp(
+        &self,
+        bytes: Vec<u8>,
+        ext: &str,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let token = self.get_token().await;
+        let file_id = uuid_v4();
+        let file_name = format!("bot/{}.{}", file_id, ext);
+        let url = format!(
+            "{}/storage/v1/object/pfp/{}",
+            CONFIG.supabase_url, file_name
+        );
+        let content_type = match ext.to_lowercase().as_str() {
+            "png" => "image/png",
+            "webp" => "image/webp",
+            _ => "image/jpeg",
+        };
+
+        let mut headers = self.default_headers(token.as_deref());
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_str(content_type).unwrap_or(HeaderValue::from_static("image/jpeg")),
+        );
+        headers.insert("x-upsert", HeaderValue::from_static("true"));
+
+        let resp = self
+            .http
+            .post(&url)
+            .headers(headers)
+            .body(bytes)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(format!("Failed to upload bot avatar: {}", err_text).into());
+        }
+
+        let public_url = format!(
+            "{}/storage/v1/object/public/pfp/{}",
+            CONFIG.supabase_url, file_name
+        );
+        Ok(public_url)
+    }
+
     pub async fn update_bot(
         &self,
         bot_id: &str,
@@ -906,18 +984,22 @@ impl SupabaseClient {
         sys_prompt: &str,
         bio: Option<&str>,
         description: Option<&str>,
+        pfp_url: Option<&str>,
         bubble_color: Option<&str>,
     ) -> Result<DbBot, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/rest/v1/bots?id=eq.{}", CONFIG.supabase_url, bot_id);
         let token = self.get_token().await;
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "name": name.trim(),
             "sys_prompt": sys_prompt.trim(),
             "bio": bio.map(|s| s.trim()),
             "description": description.map(|s| s.trim()),
             "bubble_color": bubble_color,
         });
+        if let Some(purl) = pfp_url {
+            body["pfp_url"] = serde_json::json!(purl);
+        }
 
         let mut headers = self.default_headers(token.as_deref());
         headers.insert("Prefer", HeaderValue::from_static("return=representation"));
