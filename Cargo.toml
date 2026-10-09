@@ -1,13 +1,13 @@
 [package]
 name = "rttext"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 authors = ["Lemomation"]
 description = "Native Windows desktop client for RtText with 1:1 Material 3 UI and ultra-low RAM usage."
 
 [dependencies]
 slint = "1.9"
-tokio = { version = "1.43", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio = { version = "1.43", features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
 serde = { version = "1.0", features = ["derive"] }

@@ -60,6 +60,7 @@ export component MainWindow inherits Window {
     in-out property <string> auth-username: "";
     in-out property <string> auth-error: "";
     in-out property <bool> auth-busy: false;
+    in-out property <bool> show-email-auth: false;
 
     // 2. Navigation State
     in-out property <string> active-nav: "chats"; // "chats", "discover", "profile"
@@ -88,7 +89,7 @@ export component MainWindow inherits Window {
     in-out property <string> draft-text: "";
 
     // 6. App Updates State
-    in-out property <string> app-version: "v0.3.2";
+    in-out property <string> app-version: "v0.3.3";
     in-out property <string> update-status: "idle"; // "idle", "checking", "up-to-date", "available", "downloading"
     in-out property <string> latest-version-tag: "";
 
@@ -106,6 +107,7 @@ export component MainWindow inherits Window {
     callback accent-changed(string, color);
 
     // Auth Callbacks
+    callback google-login-requested();
     callback login-requested(string, string);
     callback signup-requested(string, string, string);
     callback logout-requested();
@@ -130,184 +132,76 @@ export component MainWindow inherits Window {
                 alignment: center;
 
                 Rectangle {
-                    width: 400px;
+                    width: 420px;
                     border-radius: 28px;
                     background: Theme.card;
                     border-width: 1px;
                     border-color: Theme.border;
 
                     VerticalLayout {
-                        padding: 32px;
-                        spacing: 16px;
+                        padding: 36px;
+                        spacing: 20px;
                         alignment: center;
 
                         // Logo & Brand Header
-                        HorizontalLayout {
+                        VerticalLayout {
                             alignment: center;
-                            spacing: 14px;
-
-                            Image {
-                                source: @image-url("../assets/icons/bead.png");
-                                width: 48px;
-                                height: 48px;
-                                y: (parent.height - self.height) / 2;
-                            }
-
-                            VerticalLayout {
-                                alignment: center;
-                                spacing: 2px;
-                                Text {
-                                    text: "RtText";
-                                    color: Theme.text-primary;
-                                    font-size: 24px;
-                                    font-weight: 800;
-                                }
-                                Text {
-                                    text: "Material 3 Windows Desktop";
-                                    color: Theme.text-subtle;
-                                    font-size: 11px;
-                                }
-                            }
-                        }
-
-                        // Segmented Pill: Sign In | Create Account
-                        Rectangle {
-                            height: 38px;
-                            border-radius: 19px;
-                            background: Theme.surface;
-                            border-width: 1px;
-                            border-color: Theme.border;
+                            spacing: 12px;
 
                             HorizontalLayout {
-                                padding: 2px;
-                                spacing: 2px;
-
-                                TouchArea {
-                                    horizontal-stretch: 1;
-                                    clicked => { root.auth-mode = "login"; root.auth-error = ""; }
-                                    Rectangle {
-                                        border-radius: 17px;
-                                        background: root.auth-mode == "login" ? #332610 : transparent;
-                                        border-width: root.auth-mode == "login" ? 1px : 0px;
-                                        border-color: root.user-accent-color;
-                                        Text {
-                                            text: "Sign In";
-                                            color: root.auth-mode == "login" ? root.user-accent-color : Theme.text-secondary;
-                                            font-size: 13px;
-                                            font-weight: 700;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-                                }
-
-                                TouchArea {
-                                    horizontal-stretch: 1;
-                                    clicked => { root.auth-mode = "signup"; root.auth-error = ""; }
-                                    Rectangle {
-                                        border-radius: 17px;
-                                        background: root.auth-mode == "signup" ? #332610 : transparent;
-                                        border-width: root.auth-mode == "signup" ? 1px : 0px;
-                                        border-color: root.user-accent-color;
-                                        Text {
-                                            text: "Create Account";
-                                            color: root.auth-mode == "signup" ? root.user-accent-color : Theme.text-secondary;
-                                            font-size: 13px;
-                                            font-weight: 700;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                        }
-                                    }
+                                alignment: center;
+                                Image {
+                                    source: @image-url("../assets/icons/bead.png");
+                                    width: 64px;
+                                    height: 64px;
                                 }
                             }
-                        }
 
-                        // Username field (Sign up only)
-                        if root.auth-mode == "signup" : Rectangle {
-                            height: 44px;
-                            border-radius: 22px;
-                            background: Theme.surface-high;
-                            border-width: 1px;
-                            border-color: Theme.border;
-
-                            if root.auth-username == "" : Text {
-                                x: 18px;
-                                text: "Username";
-                                color: Theme.text-subtle;
-                                font-size: 13px;
-                                vertical-alignment: center;
+                            Text {
+                                text: "RtText";
+                                color: Theme.text-primary;
+                                font-size: 28px;
+                                font-weight: 800;
+                                horizontal-alignment: center;
                             }
 
-                            TextInput {
-                                x: 18px;
-                                width: parent.width - 36px;
-                                height: 44px;
-                                text <=> root.auth-username;
-                                color: Theme.text-primary;
+                            Text {
+                                text: "Chat with AI characters you create.";
+                                color: Theme.text-subtle;
                                 font-size: 13px;
-                                vertical-alignment: center;
+                                horizontal-alignment: center;
                             }
                         }
 
-                        // Email input
-                        Rectangle {
-                            height: 44px;
-                            border-radius: 22px;
-                            background: Theme.surface-high;
-                            border-width: 1px;
-                            border-color: Theme.border;
+                        // Google Sign In Button (Front & Center)
+                        TouchArea {
+                            height: 52px;
+                            enabled: !root.auth-busy;
+                            clicked => { root.google-login-requested(); }
 
-                            if root.auth-email == "" : Text {
-                                x: 18px;
-                                text: "Email address";
-                                color: Theme.text-subtle;
-                                font-size: 13px;
-                                vertical-alignment: center;
-                            }
+                            Rectangle {
+                                border-radius: 26px;
+                                background: root.auth-busy ? #252b36 : #ffffff;
+                                border-width: 1px;
+                                border-color: root.auth-busy ? #374151 : #e5e7eb;
 
-                            TextInput {
-                                x: 18px;
-                                width: parent.width - 36px;
-                                height: 44px;
-                                text <=> root.auth-email;
-                                color: Theme.text-primary;
-                                font-size: 13px;
-                                vertical-alignment: center;
-                            }
-                        }
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 12px;
 
-                        // Password input
-                        Rectangle {
-                            height: 44px;
-                            border-radius: 22px;
-                            background: Theme.surface-high;
-                            border-width: 1px;
-                            border-color: Theme.border;
+                                    if !root.auth-busy : Image {
+                                        source: @image-url("../assets/icons/google.svg");
+                                        width: 22px;
+                                        height: 22px;
+                                        y: (parent.height - self.height) / 2;
+                                    }
 
-                            if root.auth-password == "" : Text {
-                                x: 18px;
-                                text: "Password";
-                                color: Theme.text-subtle;
-                                font-size: 13px;
-                                vertical-alignment: center;
-                            }
-
-                            TextInput {
-                                x: 18px;
-                                width: parent.width - 36px;
-                                height: 44px;
-                                input-type: password;
-                                text <=> root.auth-password;
-                                color: Theme.text-primary;
-                                font-size: 13px;
-                                vertical-alignment: center;
-                                accepted => {
-                                    if !root.auth-busy && root.auth-email != "" && root.auth-password != "" {
-                                        if root.auth-mode == "login" {
-                                            root.login-requested(root.auth-email, root.auth-password);
-                                        } else {
-                                            root.signup-requested(root.auth-email, root.auth-password, root.auth-username);
-                                        }
+                                    Text {
+                                        text: root.auth-busy ? "Waiting for Google sign in in browser..." : "Continue with Google";
+                                        color: root.auth-busy ? #9ca3af : #1f2937;
+                                        font-size: 15px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
                                     }
                                 }
                             }
@@ -331,30 +225,178 @@ export component MainWindow inherits Window {
                             }
                         }
 
-                        // Submit Button
+                        // Subtle Developer email login toggle
                         TouchArea {
-                            height: 46px;
-                            clicked => {
-                                if !root.auth-busy && root.auth-email != "" && root.auth-password != "" {
-                                    if root.auth-mode == "login" {
-                                        root.login-requested(root.auth-email, root.auth-password);
-                                    } else {
-                                        root.signup-requested(root.auth-email, root.auth-password, root.auth-username);
+                            height: 24px;
+                            clicked => { root.show-email-auth = !root.show-email-auth; }
+                            Text {
+                                text: root.show-email-auth ? "Hide email sign in" : "Developer: Sign in with email instead";
+                                color: Theme.text-subtle;
+                                font-size: 12px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        // Expandable email/password section (only if toggled)
+                        if root.show-email-auth : VerticalLayout {
+                            spacing: 12px;
+
+                            // Segmented Pill: Sign In | Create Account
+                            Rectangle {
+                                height: 34px;
+                                border-radius: 17px;
+                                background: Theme.surface;
+                                border-width: 1px;
+                                border-color: Theme.border;
+
+                                HorizontalLayout {
+                                    padding: 2px;
+                                    spacing: 2px;
+
+                                    TouchArea {
+                                        horizontal-stretch: 1;
+                                        clicked => { root.auth-mode = "login"; root.auth-error = ""; }
+                                        Rectangle {
+                                            border-radius: 15px;
+                                            background: root.auth-mode == "login" ? #332610 : transparent;
+                                            border-width: root.auth-mode == "login" ? 1px : 0px;
+                                            border-color: root.user-accent-color;
+                                            Text {
+                                                text: "Sign In";
+                                                color: root.auth-mode == "login" ? root.user-accent-color : Theme.text-secondary;
+                                                font-size: 12px;
+                                                font-weight: 700;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+
+                                    TouchArea {
+                                        horizontal-stretch: 1;
+                                        clicked => { root.auth-mode = "signup"; root.auth-error = ""; }
+                                        Rectangle {
+                                            border-radius: 15px;
+                                            background: root.auth-mode == "signup" ? #332610 : transparent;
+                                            border-width: root.auth-mode == "signup" ? 1px : 0px;
+                                            border-color: root.user-accent-color;
+                                            Text {
+                                                text: "Create Account";
+                                                color: root.auth-mode == "signup" ? root.user-accent-color : Theme.text-secondary;
+                                                font-size: 12px;
+                                                font-weight: 700;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
                                     }
                                 }
                             }
 
-                            Rectangle {
-                                border-radius: 23px;
-                                background: root.auth-busy ? #333333 : root.user-accent-color;
+                            if root.auth-mode == "signup" : Rectangle {
+                                height: 40px;
+                                border-radius: 20px;
+                                background: Theme.surface-high;
+                                border-width: 1px;
+                                border-color: Theme.border;
 
-                                Text {
-                                    text: root.auth-busy ? "Connecting..." : (root.auth-mode == "login" ? "Sign In" : "Create Account");
-                                    color: root.auth-busy ? #aaaaaa : #0b0f14;
-                                    font-size: 14px;
-                                    font-weight: 700;
-                                    horizontal-alignment: center;
+                                if root.auth-username == "" : Text {
+                                    x: 16px;
+                                    text: "Username";
+                                    color: Theme.text-subtle;
+                                    font-size: 12px;
                                     vertical-alignment: center;
+                                }
+
+                                TextInput {
+                                    x: 16px;
+                                    width: parent.width - 32px;
+                                    height: 40px;
+                                    text <=> root.auth-username;
+                                    color: Theme.text-primary;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            Rectangle {
+                                height: 40px;
+                                border-radius: 20px;
+                                background: Theme.surface-high;
+                                border-width: 1px;
+                                border-color: Theme.border;
+
+                                if root.auth-email == "" : Text {
+                                    x: 16px;
+                                    text: "Email address";
+                                    color: Theme.text-subtle;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                }
+
+                                TextInput {
+                                    x: 16px;
+                                    width: parent.width - 32px;
+                                    height: 40px;
+                                    text <=> root.auth-email;
+                                    color: Theme.text-primary;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            Rectangle {
+                                height: 40px;
+                                border-radius: 20px;
+                                background: Theme.surface-high;
+                                border-width: 1px;
+                                border-color: Theme.border;
+
+                                if root.auth-password == "" : Text {
+                                    x: 16px;
+                                    text: "Password";
+                                    color: Theme.text-subtle;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                }
+
+                                TextInput {
+                                    x: 16px;
+                                    width: parent.width - 32px;
+                                    height: 40px;
+                                    input-type: password;
+                                    text <=> root.auth-password;
+                                    color: Theme.text-primary;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            TouchArea {
+                                height: 42px;
+                                clicked => {
+                                    if !root.auth-busy && root.auth-email != "" && root.auth-password != "" {
+                                        if root.auth-mode == "login" {
+                                            root.login-requested(root.auth-email, root.auth-password);
+                                        } else {
+                                            root.signup-requested(root.auth-email, root.auth-password, root.auth-username);
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    border-radius: 21px;
+                                    background: root.auth-busy ? #333333 : root.user-accent-color;
+
+                                    Text {
+                                        text: root.auth-busy ? "Connecting..." : (root.auth-mode == "login" ? "Sign In" : "Create Account");
+                                        color: root.auth-busy ? #aaaaaa : #0b0f14;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
                                 }
                             }
                         }

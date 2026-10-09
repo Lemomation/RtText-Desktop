@@ -135,6 +135,199 @@ impl SupabaseClient {
         Ok(session)
     }
 
+    pub async fn fetch_user_with_token(
+        &self,
+        token: &str,
+    ) -> Result<(String, Option<String>), Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!("{}/auth/v1/user", CONFIG.supabase_url);
+        let resp = self
+            .http
+            .get(&url)
+            .headers(self.default_headers(Some(token)))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(format!("Failed to fetch user with token: {}", err_text).into());
+        }
+
+        let val: serde_json::Value = resp.json().await?;
+        let user_id = val
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "Missing id in user response")?
+            .to_string();
+        let email = val.get("email").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+        Ok((user_id, email))
+    }
+
+    pub async fn start_google_oauth_flow(
+        &self,
+    ) -> Result<SessionData, Box<dyn std::error::Error + Send + Sync>> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:54321")
+            .await
+            .map_err(|e| format!("Failed to start local OAuth listener on port 54321: {}", e))?;
+
+        let authorize_url = format!(
+            "{}/auth/v1/authorize?provider=google&redirect_to=http://localhost:54321/callback",
+            CONFIG.supabase_url
+        );
+
+        println!("Launching browser for Google OAuth: {}", authorize_url);
+        let _ = std::process::Command::new("cmd")
+            .args(["/c", "start", &authorize_url])
+            .spawn();
+
+        let client = self.clone();
+
+        let handle_future = async move {
+            let mut captured_session: Option<SessionData> = None;
+
+            while captured_session.is_none() {
+                let (mut socket, _) = listener.accept().await.map_err(|e| e.to_string())?;
+                let mut buf = vec![0u8; 4096];
+                let n = socket.read(&mut buf).await.map_err(|e| e.to_string())?;
+                let req_str = String::from_utf8_lossy(&buf[..n]);
+
+                let first_line = req_str.lines().next().unwrap_or("");
+                let parts: Vec<&str> = first_line.split_whitespace().collect();
+                if parts.len() < 2 {
+                    continue;
+                }
+                let path = parts[1];
+
+                if path.starts_with("/callback") {
+                    let html = r#"<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>RtText - Google Sign In</title>
+  <style>
+    body {
+      background-color: #0E131B;
+      color: #E2E8F0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .card {
+      background: #18202E;
+      border: 1px solid #283549;
+      padding: 40px;
+      border-radius: 24px;
+      text-align: center;
+      max-width: 400px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+    h2 { margin: 0 0 12px; color: #FBBF24; font-size: 22px; }
+    p { margin: 0; color: #94A3B8; font-size: 14px; line-height: 1.5; }
+    .success { color: #34D399; font-weight: 600; margin-top: 16px; display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div style="font-size: 44px; margin-bottom: 12px;">✨</div>
+    <h2>Authenticating with RtText</h2>
+    <p id="msg">Completing Google Sign In...</p>
+    <div id="success" class="success">✓ Signed in successfully! You can close this tab and return to RtText.</div>
+  </div>
+  <script>
+    function finish() {
+      document.getElementById('msg').style.display = 'none';
+      document.getElementById('success').style.display = 'block';
+      setTimeout(function() { window.close(); }, 1200);
+    }
+
+    if (window.location.hash) {
+      var hash = window.location.hash.substring(1);
+      fetch('/auth/token?' + hash).then(finish).catch(finish);
+    } else if (window.location.search) {
+      fetch('/auth/token' + window.location.search).then(finish).catch(finish);
+    } else {
+      document.getElementById('msg').innerText = 'No authentication tokens found. Please try again.';
+    }
+  </script>
+</body>
+</html>"#;
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        html.len(),
+                        html
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                } else if path.starts_with("/auth/token?") {
+                    let query = &path["/auth/token?".len()..];
+                    let mut access_token = String::new();
+                    let mut refresh_token = String::new();
+
+                    for pair in query.split('&') {
+                        let mut kv = pair.splitn(2, '=');
+                        if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
+                            let decoded_val = urlencoding_decode(v);
+                            if k == "access_token" {
+                                access_token = decoded_val;
+                            } else if k == "refresh_token" {
+                                refresh_token = decoded_val;
+                            }
+                        }
+                    }
+
+                    if !access_token.is_empty() {
+                        match client.fetch_user_with_token(&access_token).await {
+                            Ok((user_id, email)) => {
+                                let session = SessionData {
+                                    access_token: access_token.clone(),
+                                    refresh_token: if refresh_token.is_empty() { access_token.clone() } else { refresh_token },
+                                    user_id,
+                                    email,
+                                };
+                                *client.access_token.write().await = Some(session.access_token.clone());
+                                *client.refresh_token.write().await = Some(session.refresh_token.clone());
+                                *client.user_id.write().await = Some(session.user_id.clone());
+                                captured_session = Some(session);
+
+                                let resp = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK";
+                                let _ = socket.write_all(resp.as_bytes()).await;
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to verify token with Supabase: {}", e);
+                                let resp = "HTTP/1.1 500 Internal Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                                let _ = socket.write_all(resp.as_bytes()).await;
+                            }
+                        }
+                    } else {
+                        let resp = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                        let _ = socket.write_all(resp.as_bytes()).await;
+                    }
+                } else {
+                    let resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                    let _ = socket.write_all(resp.as_bytes()).await;
+                }
+            }
+
+            captured_session.ok_or_else(|| "Failed to capture Google session".to_string())
+        };
+
+        tokio::select! {
+            res = handle_future => {
+                match res {
+                    Ok(sess) => Ok(sess),
+                    Err(e) => Err(e.into()),
+                }
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_secs(120)) => {
+                Err("Google sign in timed out. Please try again.".into())
+            }
+        }
+    }
+
     pub async fn set_session(&self, session: &SessionData) {
         *self.access_token.write().await = Some(session.access_token.clone());
         *self.refresh_token.write().await = session.refresh_token.clone();
@@ -696,3 +889,25 @@ pub fn parse_hex_color(hex: &str) -> slint::Color {
     }
     slint::Color::from_argb_u8(255, 30, 37, 48) // Default dark grey
 }
+
+fn urlencoding_decode(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '%' {
+            let hex: String = chars.by_ref().take(2).collect();
+            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                result.push(byte as char);
+            } else {
+                result.push('%');
+                result.push_str(&hex);
+            }
+        } else if ch == '+' {
+            result.push(' ');
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+

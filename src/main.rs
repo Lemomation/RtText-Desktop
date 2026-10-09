@@ -532,7 +532,58 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // AUTH CALLBACKS
-    // 1. Login Requested
+    // 0. Google Login Requested (Official OAuth Flow)
+    {
+        let client = client.clone();
+        let window_weak = main_window.as_weak();
+        let my_uid = my_user_id.clone();
+        let load_fn = load_app_data.clone();
+
+        main_window.on_google_login_requested(move || {
+            let client = client.clone();
+            let window_weak = window_weak.clone();
+            let my_uid = my_uid.clone();
+            let load_fn = load_fn.clone();
+
+            if let Some(w) = window_weak.upgrade() {
+                w.set_auth_busy(true);
+                w.set_auth_error("".into());
+            }
+
+            tokio::spawn(async move {
+                match client.start_google_oauth_flow().await {
+                    Ok(session) => {
+                        save_session(&session);
+                        *my_uid.write().await = session.user_id.clone();
+
+                        let uid = session.user_id.clone();
+                        let w_clone = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w_clone.upgrade() {
+                                w.set_auth_busy(false);
+                                w.set_is_logged_in(true);
+                                w.set_auth_error("".into());
+                            }
+                        });
+
+                        load_fn(uid);
+                    }
+                    Err(e) => {
+                        let err_msg = e.to_string();
+                        let w_clone = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w_clone.upgrade() {
+                                w.set_auth_busy(false);
+                                w.set_auth_error(err_msg.into());
+                            }
+                        });
+                    }
+                }
+            });
+        });
+    }
+
+    // 1. Login Requested (Developer / Password Fallback)
     {
         let client = client.clone();
         let window_weak = main_window.as_weak();
