@@ -938,7 +938,7 @@ impl SupabaseClient {
         ext: &str,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let token = self.get_token().await;
-        let file_id = uuid_v4();
+        let file_id = format!("{:x}", rand_u128());
         let file_name = format!("bot/{}.{}", file_id, ext);
         let url = format!(
             "{}/storage/v1/object/pfp/{}",
@@ -952,7 +952,7 @@ impl SupabaseClient {
 
         let mut headers = self.default_headers(token.as_deref());
         headers.insert(
-            header::CONTENT_TYPE,
+            CONTENT_TYPE,
             HeaderValue::from_str(content_type).unwrap_or(HeaderValue::from_static("image/jpeg")),
         );
         headers.insert("x-upsert", HeaderValue::from_static("true"));
