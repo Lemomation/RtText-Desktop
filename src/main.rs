@@ -133,9 +133,9 @@ async fn fetch_and_build_messages(
     my_uid: &str,
     is_bot_chat: bool,
     is_group: bool,
-    bot_bubble_color: slint::Color,
-    user_accent: slint::Color,
-) -> Vec<MessageItem> {
+    bot_bubble_color: &str,
+    user_accent: &str,
+) -> Vec<RawMsgItem> {
     let msgs = match client.fetch_messages(cid).await {
         Ok(m) => m,
         Err(_) => return Vec::new(),
@@ -149,8 +149,9 @@ async fn fetch_and_build_messages(
 
     let mut items = Vec::new();
     let mut prev_time: Option<chrono::DateTime<chrono::Local>> = None;
+    let msgs_len = msgs.len();
 
-    for (i, m) in msgs.iter().enumerate() {
+    for (i, m) in msgs.into_iter().enumerate() {
         let msg_time = m.created_at.as_deref().and_then(|t| {
             chrono::DateTime::parse_from_rfc3339(t).ok().map(|dt| dt.with_timezone(&chrono::Local))
         });
@@ -181,19 +182,18 @@ async fn fetch_and_build_messages(
                     curr.format("%b %-d, %-I:%M %p").to_string()
                 };
 
-                items.push(MessageItem {
-                    id: format!("sep_{}", m.id).into(),
-                    content: "".into(),
-                    timestamp: "".into(),
+                items.push(RawMsgItem {
+                    id: format!("sep_{}", m.id),
+                    content: String::new(),
+                    timestamp: String::new(),
                     is_me: false,
-                    bubble_color: slint::Color::from_argb_u8(0, 0, 0, 0),
-                    has_media: false,
-                    media_image: slint::Image::default(),
+                    bubble_color_hex: String::new(),
+                    media_img: None,
                     show_sender: false,
-                    sender_name: "".into(),
+                    sender_name: String::new(),
                     is_read: false,
                     is_separator: true,
-                    separator_text: label.into(),
+                    separator_text: label,
                 });
             }
             prev_time = Some(curr);
@@ -203,7 +203,7 @@ async fn fetch_and_build_messages(
 
         let is_read = if is_me {
             if is_bot_chat {
-                i < msgs.len() - 1
+                i < msgs_len - 1
             } else {
                 false
             }
@@ -239,33 +239,60 @@ async fn fetch_and_build_messages(
             }
         }
 
-        let has_media = media_img.is_some();
-        let img = media_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
         let bubble = if is_me {
-            user_accent
+            user_accent.to_string()
         } else if is_bot_chat {
-            bot_bubble_color
+            bot_bubble_color.to_string()
         } else {
-            parse_hex_color("#1E2530")
+            "#1E2530".to_string()
         };
 
-        items.push(MessageItem {
-            id: m.id.into(),
-            content: m.content.unwrap_or_default().into(),
-            timestamp: format_bubble_time(m.created_at.as_deref().unwrap_or("")).into(),
+        let formatted_time = format_bubble_time(m.created_at.as_deref().unwrap_or(""));
+
+        items.push(RawMsgItem {
+            id: m.id,
+            content: m.content.unwrap_or_default(),
+            timestamp: formatted_time,
             is_me,
-            bubble_color: bubble,
-            has_media,
-            media_image: img,
+            bubble_color_hex: bubble,
+            media_img,
             show_sender,
-            sender_name: sender_name.into(),
+            sender_name,
             is_read,
             is_separator: false,
-            separator_text: "".into(),
+            separator_text: String::new(),
         });
     }
 
     items
+}
+
+fn raw_to_message_items(raw: Vec<RawMsgItem>) -> Vec<MessageItem> {
+    raw.into_iter()
+        .map(|m| {
+            let has_media = m.media_img.is_some();
+            let img = m.media_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+            let bubble = if m.is_separator {
+                slint::Color::from_argb_u8(0, 0, 0, 0)
+            } else {
+                parse_hex_color(&m.bubble_color_hex)
+            };
+            MessageItem {
+                id: m.id.into(),
+                content: m.content.into(),
+                timestamp: m.timestamp.into(),
+                is_me: m.is_me,
+                bubble_color: bubble,
+                has_media,
+                media_image: img,
+                show_sender: m.show_sender,
+                sender_name: m.sender_name.into(),
+                is_read: m.is_read,
+                is_separator: m.is_separator,
+                separator_text: m.separator_text.into(),
+            }
+        })
+        .collect()
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -610,17 +637,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let cur_cid = active_id.read().await.clone();
                     if !cur_cid.is_empty() {
                         let is_bot = active_bot.read().await.is_some();
-                        let (user_accent, bot_color) = if let Some(w) = window_weak.upgrade() {
-                            (w.get_user_accent_color(), w.get_active_chat_bubble_color())
-                        } else {
-                            (parse_hex_color("#F59E0B"), parse_hex_color("#FB7185"))
-                        };
-
                         let is_grp = conv_is_group.read().await.get(&cur_cid).copied().unwrap_or(false);
-                        let items = fetch_and_build_messages(&client, &cur_cid, &uid, is_bot, is_grp, bot_color, user_accent).await;
+                        let raw_items = fetch_and_build_messages(&client, &cur_cid, &uid, is_bot, is_grp, "#FB7185", "#F59E0B").await;
                         let w_clone = window_weak.clone();
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(w) = w_clone.upgrade() {
+                                let items = raw_to_message_items(raw_items);
                                 let model = std::rc::Rc::new(slint::VecModel::from(items));
                                 w.set_messages(model.into());
                                 w.set_chat_viewport_y(-100000.0);
@@ -912,11 +934,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     });
 
                     // Fetch messages for this DM
-                    let user_accent = if let Some(w) = window_weak.upgrade() { w.get_user_accent_color() } else { parse_hex_color("#F59E0B") };
-                    let items = fetch_and_build_messages(&client, &conv.id, &uid, false, false, parse_hex_color("#1E2530"), user_accent).await;
+                    let raw_items = fetch_and_build_messages(&client, &conv.id, &uid, false, false, "#1E2530", "#F59E0B").await;
                     let w_clone = window_weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = w_clone.upgrade() {
+                            let items = raw_to_message_items(raw_items);
                             let model = std::rc::Rc::new(slint::VecModel::from(items));
                             w.set_messages(model.into());
                             w.set_chat_viewport_y(-100000.0);
@@ -1071,7 +1093,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let bot_to_conv = bot_to_conv.clone();
             let conv_is_group = conv_is_group.clone();
             let sel_id = id.to_string();
-            let bot_bubble_color = color;
+            let bot_color_hex = format!("#{:02x}{:02x}{:02x}", color.red(), color.green(), color.blue());
             let is_bot_chat = is_bot;
 
             tokio::spawn(async move {
@@ -1105,17 +1127,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 *active_id.write().await = cid.clone();
                 *active_bot.write().await = bid;
 
-                let user_accent = if let Some(w) = window_weak.upgrade() {
-                    w.get_user_accent_color()
-                } else {
-                    parse_hex_color("#F59E0B")
-                };
-
                 let is_grp = conv_is_group.read().await.get(&cid).copied().unwrap_or(false);
-                let items = fetch_and_build_messages(&client, &cid, &uid, is_bot_chat, is_grp, bot_bubble_color, user_accent).await;
+                let raw_items = fetch_and_build_messages(&client, &cid, &uid, is_bot_chat, is_grp, &bot_color_hex, "#F59E0B").await;
                 let w_clone = window_weak.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = w_clone.upgrade() {
+                        let items = raw_to_message_items(raw_items);
                         let model = std::rc::Rc::new(slint::VecModel::from(items));
                         w.set_messages(model.into());
                         w.set_chat_viewport_y(-100000.0);
@@ -1275,13 +1292,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     let has_avatar = avatar_img.is_some();
-                    let img = avatar_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
                     let letter = bot.name.chars().next().unwrap_or('B').to_uppercase().to_string();
-                    let b_color = parse_hex_color(&bot.bubble_color.unwrap_or_else(|| "#FB7185".into()));
+                    let b_color_hex = bot.bubble_color.unwrap_or_else(|| "#FB7185".into());
 
                     let w_clone = window_weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = w_clone.upgrade() {
+                            let img = avatar_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+                            let b_color = parse_hex_color(&b_color_hex);
                             w.set_bot_profile_id(bot.id.into());
                             w.set_bot_profile_name(bot.name.into());
                             w.set_bot_profile_bio(bot.bio.unwrap_or_default().into());
@@ -1432,25 +1450,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     bot_to_conv.write().await.insert(bid.clone(), cid.clone());
                     conv_to_bot.write().await.insert(cid.clone(), Some(bid.clone()));
 
-                    let (b_name, b_bio, b_letter, b_has_avatar, b_avatar, b_color) = if let Ok(Some(b)) = client.fetch_bot_by_id(&bid).await {
-                        let mut avatar_img = None;
+                    let (b_name, b_bio, b_letter, b_has_avatar, avatar_img, b_color_hex) = if let Ok(Some(b)) = client.fetch_bot_by_id(&bid).await {
+                        let mut a_img = None;
                         if let Some(pfp) = b.pfp_url.as_deref() {
                             if let Some(bytes) = client.fetch_and_cache_image(pfp).await {
-                                avatar_img = decode_image_rgba(&bytes);
+                                a_img = decode_image_rgba(&bytes);
                             }
                         }
-                        let has_a = avatar_img.is_some();
-                        let a_img = avatar_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+                        let has_a = a_img.is_some();
                         let l = b.name.chars().next().unwrap_or('B').to_uppercase().to_string();
-                        let col = parse_hex_color(&b.bubble_color.unwrap_or_else(|| "#FB7185".into()));
+                        let col = b.bubble_color.unwrap_or_else(|| "#FB7185".into());
                         (b.name, b.bio.unwrap_or_default(), l, has_a, a_img, col)
                     } else {
-                        ("Bot".into(), "".into(), "B".into(), false, slint::Image::default(), parse_hex_color("#FB7185"))
+                        ("Bot".into(), "".into(), "B".into(), false, None, "#FB7185".into())
                     };
 
                     let w_clone = window_weak.clone();
+                    let b_col_copy = b_color_hex.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = w_clone.upgrade() {
+                            let b_avatar = avatar_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+                            let b_color = parse_hex_color(&b_col_copy);
                             w.set_active_chat_id(cid.clone().into());
                             w.set_active_chat_title(b_name.into());
                             w.set_active_chat_subtitle(b_bio.into());
@@ -1464,10 +1484,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     });
 
                     // Load messages & scroll to bottom
-                    let items = fetch_and_build_messages(&client, &c.id, &uid, true, false, b_color, parse_hex_color("#F59E0B")).await;
+                    let raw_items = fetch_and_build_messages(&client, &c.id, &uid, true, false, &b_color_hex, "#F59E0B").await;
                     let w_clone = window_weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = w_clone.upgrade() {
+                            let items = raw_to_message_items(raw_items);
                             let model = std::rc::Rc::new(slint::VecModel::from(items));
                             w.set_messages(model.into());
                             w.set_chat_viewport_y(-100000.0);
@@ -1561,21 +1582,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let u = profile.username.unwrap_or_else(|| "User".into());
                         let l = u.chars().next().unwrap_or('U').to_uppercase().to_string();
                         let has_a = a_img.is_some();
-                        let img = a_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
-                        (u, l, has_a, img)
+                        (u, l, has_a, a_img)
                     } else {
-                        ("User".into(), "U".into(), false, slint::Image::default())
+                        ("User".into(), "U".into(), false, None)
                     };
 
                     let w_clone = window_weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = w_clone.upgrade() {
+                            let img = avatar_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
                             w.set_active_chat_id(cid.clone().into());
                             w.set_active_chat_title(uname.into());
                             w.set_active_chat_subtitle("Direct message".into());
                             w.set_active_chat_avatar(letter.into());
                             w.set_active_chat_has_avatar(has_avatar);
-                            w.set_active_chat_avatar_image(avatar_img);
+                            w.set_active_chat_avatar_image(img);
                             w.set_active_chat_is_bot(false);
                             w.set_active_chat_bubble_color(parse_hex_color("#1E2530"));
                             w.set_active_nav("chats".into());
@@ -1583,10 +1604,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     });
 
                     // Load messages & scroll to bottom
-                    let items = fetch_and_build_messages(&client, &c.id, &uid, false, false, parse_hex_color("#1E2530"), parse_hex_color("#F59E0B")).await;
+                    let raw_items = fetch_and_build_messages(&client, &c.id, &uid, false, false, "#1E2530", "#F59E0B").await;
                     let w_clone = window_weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = w_clone.upgrade() {
+                            let items = raw_to_message_items(raw_items);
                             let model = std::rc::Rc::new(slint::VecModel::from(items));
                             w.set_messages(model.into());
                             w.set_chat_viewport_y(-100000.0);
@@ -1687,12 +1709,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     if !cid.is_empty() && !uid.is_empty() {
                         if let Ok(msgs) = client.fetch_messages(&cid).await {
-                            let (user_accent, is_bot, bot_color) = if let Some(w) = w_clone.upgrade() {
-                                (
-                                    w.get_user_accent_color(),
-                                    w.get_active_chat_is_bot(),
-                                    w.get_active_chat_bubble_color(),
-                                )
+                            let is_bot = if let Some(w) = w_clone.upgrade() {
+                                w.get_active_chat_is_bot()
                             } else {
                                 return;
                             };
@@ -1713,18 +1731,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 };
 
                                 if !has_latest {
-                                    let items = fetch_and_build_messages(
+                                    let raw_items = fetch_and_build_messages(
                                         &client,
                                         &cid,
                                         &uid,
                                         is_bot,
                                         is_group,
-                                        bot_color,
-                                        user_accent,
+                                        "#FB7185",
+                                        "#F59E0B",
                                     ).await;
 
                                     let _ = slint::invoke_from_event_loop(move || {
                                         if let Some(w) = w_clone.upgrade() {
+                                            let items = raw_to_message_items(raw_items);
                                             let model = std::rc::Rc::new(slint::VecModel::from(items));
                                             w.set_messages(model.into());
                                             w.set_chat_viewport_y(-100000.0);

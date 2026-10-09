@@ -190,6 +190,7 @@ pub struct RawMsgItem {
     pub content: String,
     pub timestamp: String,
     pub is_me: bool,
+    pub bubble_color_hex: String,
     pub media_img: Option<DecodedImage>,
     pub show_sender: bool,
     pub sender_name: String,
