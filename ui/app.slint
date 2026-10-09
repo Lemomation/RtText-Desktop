@@ -170,12 +170,10 @@ export component MainWindow inherits Window {
     callback check-updates-requested();
     callback perform-update-requested();
 
+    in-out property <int> chat-scroll-trigger: 0;
+
     public function scroll-to-bottom() {
-        if (msg-flick.viewport-height > msg-flick.height) {
-            msg-flick.viewport-y = msg-flick.height - msg-flick.viewport-height;
-        } else {
-            msg-flick.viewport-y = 0px;
-        }
+        root.chat-scroll-trigger += 1;
     }
 
     // ==========================================
@@ -1596,6 +1594,15 @@ export component MainWindow inherits Window {
                 // 2. MESSAGES STREAM
                 msg-flick := Flickable {
                     vertical-stretch: 1;
+                    in property <int> trigger: root.chat-scroll-trigger;
+
+                    changed trigger => {
+                        if (self.viewport-height > self.height) {
+                            self.viewport-y = self.height - self.viewport-height;
+                        } else {
+                            self.viewport-y = 0px;
+                        }
+                    }
 
                     VerticalLayout {
                         padding-left: 18px;
