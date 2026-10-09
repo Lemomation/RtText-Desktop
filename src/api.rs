@@ -284,12 +284,16 @@ impl SupabaseClient {
                             Ok((user_id, email)) => {
                                 let session = SessionData {
                                     access_token: access_token.clone(),
-                                    refresh_token: if refresh_token.is_empty() { access_token.clone() } else { refresh_token },
+                                    refresh_token: if refresh_token.is_empty() {
+                                        Some(access_token.clone())
+                                    } else {
+                                        Some(refresh_token)
+                                    },
                                     user_id,
                                     email,
                                 };
                                 *client.access_token.write().await = Some(session.access_token.clone());
-                                *client.refresh_token.write().await = Some(session.refresh_token.clone());
+                                *client.refresh_token.write().await = session.refresh_token.clone();
                                 *client.user_id.write().await = Some(session.user_id.clone());
                                 captured_session = Some(session);
 
