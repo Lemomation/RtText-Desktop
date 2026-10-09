@@ -1511,7 +1511,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let uname = username.to_string();
 
             tokio::spawn(async move {
-                let (has_avatar, avatar_img, subtitle) = if let Ok(profile) = client.fetch_profile(&pid).await {
+                let (has_avatar, decoded_avatar, subtitle) = if let Ok(profile) = client.fetch_profile(&pid).await {
                     let mut a_img = None;
                     if let Some(a_url) = profile.avatar_url.as_deref() {
                         if let Some(bytes) = client.fetch_and_cache_image(a_url).await {
@@ -1519,16 +1519,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     let has_a = a_img.is_some();
-                    let img = a_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
-                    (has_a, img, "Member of RtText".to_string())
+                    (has_a, a_img, "Member of RtText".to_string())
                 } else {
-                    (false, slint::Image::default(), "Member of RtText".to_string())
+                    (false, None, "Member of RtText".to_string())
                 };
 
                 let letter = uname.chars().next().unwrap_or('U').to_uppercase().to_string();
                 let w_clone = window_weak.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = w_clone.upgrade() {
+                        let avatar_img = decoded_avatar.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
                         w.set_peer_profile_id(pid.into());
                         w.set_peer_profile_username(uname.into());
                         w.set_peer_profile_subtitle(subtitle.into());
