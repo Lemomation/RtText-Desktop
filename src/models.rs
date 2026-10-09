@@ -72,12 +72,28 @@ pub struct DbMessage {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DbBot {
     pub id: String,
+    pub owner: Option<String>,
     pub name: String,
     pub bio: Option<String>,
     pub description: Option<String>,
     pub pfp_url: Option<String>,
     pub bubble_color: Option<String>,
     pub is_public: Option<bool>,
+    pub sys_prompt: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DbGroupMember {
+    pub member_id: Option<String>,
+    pub conversation_id: Option<String>,
+    pub user_id: Option<String>,
+    pub bot_id: Option<String>,
+    pub role: Option<String>,
+    pub joined_at: Option<String>,
+    pub last_read_at: Option<String>,
+    pub name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub is_bot: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -100,6 +116,7 @@ pub struct EnrichedConversation {
     pub bubble_color: String,
     pub bot_id: Option<String>,
     pub dm_user_id: Option<String>,
+    pub is_group: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -134,8 +151,11 @@ impl DecodedImage {
 #[derive(Clone, Debug)]
 pub struct RawBotCard {
     pub id: String,
+    pub owner: Option<String>,
     pub name: String,
     pub bio: String,
+    pub description: String,
+    pub sys_prompt: String,
     pub avatar_letter: String,
     pub avatar_img: Option<DecodedImage>,
     pub bubble_color: String,
@@ -171,5 +191,11 @@ pub struct RawMsgItem {
     pub timestamp: String,
     pub is_me: bool,
     pub media_img: Option<DecodedImage>,
+    pub show_sender: bool,
+    pub sender_name: String,
+    pub is_read: bool,
+    pub is_separator: bool,
+    pub separator_text: String,
 }
+
 

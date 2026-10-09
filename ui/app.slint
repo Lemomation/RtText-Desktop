@@ -22,6 +22,11 @@ export struct MessageItem {
     bubble_color: color,
     has_media: bool,
     media_image: image,
+    show_sender: bool,
+    sender_name: string,
+    is_read: bool,
+    is_separator: bool,
+    separator_text: string,
 }
 
 export struct BotCardItem {
@@ -89,11 +94,44 @@ export component MainWindow inherits Window {
     in-out property <string> draft-text: "";
 
     // 6. App Updates State
-    in-out property <string> app-version: "v0.3.3";
+    in-out property <string> app-version: "v0.3.5";
     in-out property <string> update-status: "idle"; // "idle", "checking", "up-to-date", "available", "downloading"
     in-out property <string> latest-version-tag: "";
 
-    // 7. Data Models
+    // 7. Chat Viewport Scroll
+    in-out property <length> chat-viewport-y: 0px;
+
+    // 8. Profile & Editor Modals
+    in-out property <bool> show-bot-profile: false;
+    in-out property <string> bot-profile-id: "";
+    in-out property <string> bot-profile-name: "";
+    in-out property <string> bot-profile-bio: "";
+    in-out property <string> bot-profile-desc: "";
+    in-out property <string> bot-profile-avatar-letter: "";
+    in-out property <bool> bot-profile-has-avatar: false;
+    in-out property <image> bot-profile-avatar-image;
+    in-out property <color> bot-profile-bubble-color: Theme.accent-amber;
+    in-out property <bool> bot-profile-is-owner: false;
+
+    in-out property <bool> show-bot-editor: false;
+    in-out property <bool> bot-editor-is-edit: false;
+    in-out property <string> bot-editor-id: "";
+    in-out property <string> bot-editor-name: "";
+    in-out property <string> bot-editor-bio: "";
+    in-out property <string> bot-editor-desc: "";
+    in-out property <string> bot-editor-sys-prompt: "";
+    in-out property <string> bot-editor-color-hex: "#F59E0B";
+
+    in-out property <bool> show-peer-profile: false;
+    in-out property <string> peer-profile-id: "";
+    in-out property <string> peer-profile-username: "";
+    in-out property <string> peer-profile-subtitle: "";
+    in-out property <string> peer-profile-avatar-letter: "";
+    in-out property <bool> peer-profile-has-avatar: false;
+    in-out property <image> peer-profile-avatar-image;
+    in-out property <bool> peer-profile-is-online: false;
+
+    // 9. Data Models
     in-out property <[ConversationItem]> conversations: [];
     in-out property <[MessageItem]> messages: [];
     in-out property <[BotCardItem]> bot_directory: [];
@@ -114,6 +152,16 @@ export component MainWindow inherits Window {
 
     // Discover Callbacks
     callback person-selected(string, string);
+
+    // Profile & Bot Management Callbacks
+    callback open-bot-profile(string);
+    callback open-bot-editor(string, bool, string, string, string, string, string);
+    callback save-bot(string, bool, string, string, string, string, string);
+    callback delete-bot(string);
+    callback bot-start-chat(string);
+    callback open-peer-profile(string, string);
+    callback peer-start-chat(string);
+    callback header-profile-clicked();
 
     // Updates Callbacks
     callback check-updates-requested();
@@ -888,26 +936,35 @@ export component MainWindow inherits Window {
                         if root.discover-subnav == "characters" : VerticalLayout {
                             spacing: 10px;
 
+                            // + Create Character Button
+                            touch-create-bot := TouchArea {
+                                height: 42px;
+                                clicked => {
+                                    root.open-bot-editor("", false, "", "", "", "", "#F59E0B");
+                                }
+                                Rectangle {
+                                    border-radius: Theme.radius-pill;
+                                    background: touch-create-bot.has-hover ? #2e2616 : #231c0e;
+                                    border-width: 1px;
+                                    border-color: root.user-accent-color;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 8px;
+                                        Text {
+                                            text: "+ Create Character";
+                                            color: root.user-accent-color;
+                                            font-size: 13px;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+
                             for bot in root.bot_directory : touch-bot := TouchArea {
                                 height: 80px;
                                 clicked => {
-                                    root.active-chat-id = bot.id;
-                                    root.active-chat-title = bot.name;
-                                    root.active-chat-subtitle = bot.bio;
-                                    root.active-chat-avatar = bot.avatar-letter;
-                                    root.active-chat-has-avatar = bot.has-avatar;
-                                    root.active-chat-avatar-image = bot.avatar-image;
-                                    root.active-chat-is-bot = true;
-                                    root.active-chat-bubble-color = bot.bubble-color;
-                                    root.active-nav = "chats";
-                                    root.conversation-selected(
-                                        bot.id,
-                                        bot.name,
-                                        bot.bio,
-                                        bot.avatar-letter,
-                                        true,
-                                        bot.bubble-color
-                                    );
+                                    root.open-bot-profile(bot.id);
                                 }
 
                                 Rectangle {
@@ -972,89 +1029,122 @@ export component MainWindow inherits Window {
                             }
                         }
 
-                        // PEOPLE SUBNAV LIST
+                        // PEOPLE SUBNAV LIST (Hidden by default; only shown when searched)
                         if root.discover-subnav == "people" : VerticalLayout {
                             spacing: 10px;
 
-                            for person in root.people_directory : touch-person := TouchArea {
-                                height: 76px;
-                                clicked => {
-                                    root.active-nav = "chats";
-                                    root.person-selected(person.id, person.username);
+                            if root.search-query == "" : VerticalLayout {
+                                alignment: center;
+                                spacing: 10px;
+                                padding-top: 48px;
+                                padding-bottom: 48px;
+
+                                Image {
+                                    source: @image-url("../assets/icons/person.svg");
+                                    colorize: Theme.text-subtle;
+                                    width: 44px;
+                                    height: 44px;
+                                    horizontal-alignment: center;
                                 }
 
-                                Rectangle {
-                                    border-radius: Theme.radius-lg;
-                                    background: touch-person.has-hover ? #19202a : Theme.card;
-                                    border-width: 1px;
-                                    border-color: Theme.border;
+                                Text {
+                                    text: "Search People";
+                                    color: Theme.text-primary;
+                                    font-size: 15px;
+                                    font-weight: 600;
+                                    horizontal-alignment: center;
+                                }
 
-                                    HorizontalLayout {
-                                        padding: 12px;
-                                        spacing: 12px;
+                                Text {
+                                    text: "Type a username in the search bar above to find people.";
+                                    color: Theme.text-subtle;
+                                    font-size: 12px;
+                                    horizontal-alignment: center;
+                                }
+                            }
 
-                                        VerticalLayout {
-                                            alignment: center;
-                                            Rectangle {
-                                                width: 48px;
-                                                height: 48px;
-                                                border-radius: 24px;
-                                                background: Theme.surface-high;
-                                                clip: true;
+                            if root.search-query != "" : VerticalLayout {
+                                spacing: 10px;
 
-                                                if person.has-avatar : Image {
-                                                    source: person.avatar-image;
+                                for person in root.people_directory : touch-person := TouchArea {
+                                    height: 76px;
+                                    clicked => {
+                                        root.open-peer-profile(person.id, person.username);
+                                    }
+
+                                    Rectangle {
+                                        border-radius: Theme.radius-lg;
+                                        background: touch-person.has-hover ? #19202a : Theme.card;
+                                        border-width: 1px;
+                                        border-color: Theme.border;
+
+                                        HorizontalLayout {
+                                            padding: 12px;
+                                            spacing: 12px;
+
+                                            VerticalLayout {
+                                                alignment: center;
+                                                Rectangle {
                                                     width: 48px;
                                                     height: 48px;
-                                                    image-fit: cover;
+                                                    border-radius: 24px;
+                                                    background: Theme.surface-high;
+                                                    clip: true;
+
+                                                    if person.has-avatar : Image {
+                                                        source: person.avatar-image;
+                                                        width: 48px;
+                                                        height: 48px;
+                                                        image-fit: cover;
+                                                    }
+
+                                                    if !person.has-avatar : Text {
+                                                        text: person.avatar-letter;
+                                                        color: Theme.text-primary;
+                                                        font-size: 18px;
+                                                        font-weight: 700;
+                                                        horizontal-alignment: center;
+                                                        vertical-alignment: center;
+                                                    }
                                                 }
-
-                                                if !person.has-avatar : Text {
-                                                    text: person.avatar-letter;
-                                                    color: Theme.text-primary;
-                                                    font-size: 18px;
-                                                    font-weight: 700;
-                                                    horizontal-alignment: center;
-                                                    vertical-alignment: center;
-                                                }
                                             }
-                                        }
 
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 3px;
-                                            Text {
-                                                text: "@" + person.username;
-                                                color: Theme.text-primary;
-                                                font-size: 14px;
-                                                font-weight: 600;
-                                                overflow: elide;
-                                            }
-                                            Text {
-                                                text: person.subtitle;
-                                                color: Theme.text-secondary;
-                                                font-size: 12px;
-                                                overflow: elide;
-                                            }
-                                        }
-
-                                        VerticalLayout {
-                                            alignment: center;
-                                            Rectangle {
-                                                width: 72px;
-                                                height: 30px;
-                                                border-radius: 15px;
-                                                background: Theme.surface-high;
-                                                border-width: 1px;
-                                                border-color: root.user-accent-color;
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                spacing: 3px;
                                                 Text {
-                                                    text: "Chat";
-                                                    color: root.user-accent-color;
+                                                    text: "@" + person.username;
+                                                    color: Theme.text-primary;
+                                                    font-size: 14px;
+                                                    font-weight: 600;
+                                                    overflow: elide;
+                                                }
+                                                Text {
+                                                    text: person.subtitle;
+                                                    color: Theme.text-secondary;
                                                     font-size: 12px;
-                                                    font-weight: 700;
-                                                    horizontal-alignment: center;
-                                                    vertical-alignment: center;
+                                                    overflow: elide;
+                                                }
+                                            }
+
+                                            VerticalLayout {
+                                                alignment: center;
+                                                Rectangle {
+                                                    width: 72px;
+                                                    height: 30px;
+                                                    border-radius: 15px;
+                                                    background: Theme.surface-high;
+                                                    border-width: 1px;
+                                                    border-color: root.user-accent-color;
+                                                    Text {
+                                                        text: "Chat";
+                                                        color: root.user-accent-color;
+                                                        font-size: 12px;
+                                                        font-weight: 700;
+                                                        horizontal-alignment: center;
+                                                        vertical-alignment: center;
+                                                    }
                                                 }
                                             }
                                         }
@@ -1404,51 +1494,55 @@ export component MainWindow inherits Window {
                         padding-right: 20px;
                         alignment: space-between;
 
-                        HorizontalLayout {
-                            spacing: 14px;
-                            alignment: start;
+                        touch-hdr := TouchArea {
+                            clicked => { root.header-profile-clicked(); }
 
-                            // Avatar (Image or Initial)
-                            Rectangle {
-                                width: 40px;
-                                height: 40px;
-                                border-radius: 20px;
-                                background: Theme.surface-high;
-                                border-width: root.active-chat-is-bot ? 1.5px : 0px;
-                                border-color: root.active-chat-bubble-color;
-                                clip: true;
-                                y: (parent.height - self.height) / 2;
+                            HorizontalLayout {
+                                spacing: 14px;
+                                alignment: start;
 
-                                if root.active-chat-has-avatar : Image {
-                                    source: root.active-chat-avatar-image;
+                                // Avatar (Image or Initial)
+                                Rectangle {
                                     width: 40px;
                                     height: 40px;
-                                    image-fit: cover;
+                                    border-radius: 20px;
+                                    background: Theme.surface-high;
+                                    border-width: root.active-chat-is-bot ? 1.5px : 0px;
+                                    border-color: root.active-chat-bubble-color;
+                                    clip: true;
+                                    y: (parent.height - self.height) / 2;
+
+                                    if root.active-chat-has-avatar : Image {
+                                        source: root.active-chat-avatar-image;
+                                        width: 40px;
+                                        height: 40px;
+                                        image-fit: cover;
+                                    }
+
+                                    if !root.active-chat-has-avatar : Text {
+                                        text: root.active-chat-avatar;
+                                        color: root.active-chat-is-bot ? root.active-chat-bubble-color : Theme.text-primary;
+                                        font-size: 16px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
                                 }
 
-                                if !root.active-chat-has-avatar : Text {
-                                    text: root.active-chat-avatar;
-                                    color: root.active-chat-is-bot ? root.active-chat-bubble-color : Theme.text-primary;
-                                    font-size: 16px;
-                                    font-weight: 700;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            VerticalLayout {
-                                alignment: center;
-                                spacing: 2px;
-                                Text {
-                                    text: root.active-chat-title;
-                                    color: Theme.text-primary;
-                                    font-size: 15px;
-                                    font-weight: 600;
-                                }
-                                Text {
-                                    text: root.active-chat-subtitle;
-                                    color: Theme.text-secondary;
-                                    font-size: 12px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 2px;
+                                    Text {
+                                        text: root.active-chat-title;
+                                        color: Theme.text-primary;
+                                        font-size: 15px;
+                                        font-weight: 600;
+                                    }
+                                    Text {
+                                        text: root.active-chat-subtitle;
+                                        color: Theme.text-secondary;
+                                        font-size: 12px;
+                                    }
                                 }
                             }
                         }
@@ -1474,20 +1568,44 @@ export component MainWindow inherits Window {
                 }
 
                 // 2. MESSAGES STREAM
-                Flickable {
+                msg-flick := Flickable {
                     vertical-stretch: 1;
+                    viewport-y <=> root.chat-viewport-y;
 
                     VerticalLayout {
-                        padding: 18px;
-                        spacing: 10px;
+                        padding-left: 18px;
+                        padding-right: 18px;
+                        padding-top: 18px;
+                        padding-bottom: 24px;
+                        spacing: 12px;
                         alignment: end;
 
                         for msg in root.messages : HorizontalLayout {
-                            alignment: msg.is-me ? end : start;
+                            alignment: msg.is-separator ? center : (msg.is-me ? end : start);
 
-                            Rectangle {
+                            if msg.is-separator : Rectangle {
+                                border-radius: 12px;
+                                background: #18202d;
+                                border-width: 1px;
+                                border-color: #2b384c;
+                                HorizontalLayout {
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    padding-top: 5px;
+                                    padding-bottom: 5px;
+                                    Text {
+                                        text: msg.separator-text;
+                                        color: #94a3b8;
+                                        font-size: 11px;
+                                        font-weight: 600;
+                                    }
+                                }
+                            }
+
+                            if !msg.is-separator : Rectangle {
                                 border-radius: 16px;
                                 background: msg.bubble_color;
+                                max-width: 560px;
 
                                 VerticalLayout {
                                     padding-left: 14px;
@@ -1496,15 +1614,26 @@ export component MainWindow inherits Window {
                                     padding-bottom: 8px;
                                     spacing: 6px;
 
-                                    // Attached Media Image (if message has image)
+                                    // Sender Name (in group chat)
+                                    if msg.show-sender : Text {
+                                        text: msg.sender-name;
+                                        color: #818cf8;
+                                        font-size: 11.5px;
+                                        font-weight: 700;
+                                    }
+
+                                    // Attached Media Image (1:1 with mobile: 280x190 cover thumbnail)
                                     if msg.has-media : Rectangle {
+                                        width: 280px;
+                                        height: 190px;
                                         border-radius: 12px;
                                         clip: true;
+                                        background: #00000033;
                                         Image {
                                             source: msg.media-image;
-                                            max-width: 320px;
-                                            max-height: 240px;
-                                            image-fit: contain;
+                                            width: 100%;
+                                            height: 100%;
+                                            image-fit: cover;
                                         }
                                     }
 
@@ -1516,7 +1645,7 @@ export component MainWindow inherits Window {
                                         wrap: word-wrap;
                                     }
 
-                                    // Timestamp & Status
+                                    // Timestamp & Status (Single check vs Double blue check)
                                     HorizontalLayout {
                                         alignment: end;
                                         spacing: 4px;
@@ -1528,14 +1657,19 @@ export component MainWindow inherits Window {
                                         }
 
                                         if msg.is-me : Image {
-                                            source: @image-url("../assets/icons/checkmarks.svg");
-                                            width: 14px;
+                                            source: msg.is-read ? @image-url("../assets/icons/checkmarks.svg") : @image-url("../assets/icons/single_check.svg");
+                                            width: msg.is-read ? 14px : 11px;
                                             height: 9px;
                                             y: (parent.height - self.height) / 2;
                                         }
                                     }
                                 }
                             }
+                        }
+
+                        // Bottom Spacer so the last message is never cut off
+                        Rectangle {
+                            height: 16px;
                         }
                     }
                 }
@@ -1643,6 +1777,568 @@ export component MainWindow inherits Window {
                                         height: 18px;
                                         x: (parent.width - self.width) / 2;
                                         y: (parent.height - self.height) / 2;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ==========================================
+    // MODAL OVERLAY 1: BOT PROFILE
+    // ==========================================
+    if root.show-bot-profile : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 100%;
+        height: 100%;
+        background: #000000aa;
+
+        // Backdrop click to dismiss
+        TouchArea {
+            clicked => { root.show-bot-profile = false; }
+        }
+
+        VerticalLayout {
+            alignment: center;
+
+            HorizontalLayout {
+                alignment: center;
+
+                Rectangle {
+                    width: 440px;
+                    border-radius: 24px;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.border;
+
+                    VerticalLayout {
+                        padding: 24px;
+                        spacing: 16px;
+
+                        // Header with close button
+                        HorizontalLayout {
+                            alignment: space-between;
+                            Text {
+                                text: "Character Profile";
+                                color: Theme.text-secondary;
+                                font-size: 13px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                            TouchArea {
+                                width: 32px;
+                                height: 32px;
+                                clicked => { root.show-bot-profile = false; }
+                                Rectangle {
+                                    border-radius: 16px;
+                                    background: parent.has-hover ? Theme.surface-high : transparent;
+                                    Text {
+                                        text: "✕";
+                                        color: Theme.text-secondary;
+                                        font-size: 14px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Avatar & Name Card
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 12px;
+
+                            Rectangle {
+                                width: 72px;
+                                height: 72px;
+                                border-radius: 36px;
+                                background: Theme.surface-high;
+                                border-width: 2px;
+                                border-color: root.bot-profile-bubble-color;
+                                clip: true;
+
+                                if root.bot-profile-has-avatar : Image {
+                                    source: root.bot-profile-avatar-image;
+                                    width: 72px;
+                                    height: 72px;
+                                    image-fit: cover;
+                                }
+
+                                if !root.bot-profile-has-avatar : Text {
+                                    text: root.bot-profile-avatar-letter;
+                                    color: root.bot-profile-bubble-color;
+                                    font-size: 28px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            Text {
+                                text: root.bot-profile-name;
+                                color: Theme.text-primary;
+                                font-size: 20px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                            }
+
+                            if root.bot-profile-bio != "" : Text {
+                                text: root.bot-profile-bio;
+                                color: root.bot-profile-bubble-color;
+                                font-size: 13px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        // Description
+                        if root.bot-profile-desc != "" : Rectangle {
+                            border-radius: 14px;
+                            background: Theme.card;
+                            border-width: 1px;
+                            border-color: Theme.border;
+                            HorizontalLayout {
+                                padding: 14px;
+                                Text {
+                                    text: root.bot-profile-desc;
+                                    color: Theme.text-secondary;
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+
+                        // Primary Action: Start / Continue Chat
+                        TouchArea {
+                            height: 44px;
+                            clicked => {
+                                root.show-bot-profile = false;
+                                root.bot-start-chat(root.bot-profile-id);
+                            }
+                            Rectangle {
+                                border-radius: 22px;
+                                background: root.user-accent-color;
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 8px;
+                                    Text {
+                                        text: "Start Chat";
+                                        color: #0b0f14;
+                                        font-size: 14px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Owner Actions: Edit & Delete
+                        if root.bot-profile-is-owner : HorizontalLayout {
+                            spacing: 10px;
+
+                            TouchArea {
+                                horizontal-stretch: 1;
+                                height: 38px;
+                                clicked => {
+                                    root.show-bot-profile = false;
+                                    root.open-bot-editor(
+                                        root.bot-profile-id,
+                                        true,
+                                        root.bot-profile-name,
+                                        root.bot-profile-bio,
+                                        root.bot-profile-desc,
+                                        "",
+                                        "#F59E0B"
+                                    );
+                                }
+                                Rectangle {
+                                    border-radius: 19px;
+                                    background: Theme.surface-high;
+                                    border-width: 1px;
+                                    border-color: Theme.border;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        Text {
+                                            text: "Edit Character";
+                                            color: Theme.text-primary;
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+
+                            TouchArea {
+                                horizontal-stretch: 1;
+                                height: 38px;
+                                clicked => {
+                                    root.delete-bot(root.bot-profile-id);
+                                    root.show-bot-profile = false;
+                                }
+                                Rectangle {
+                                    border-radius: 19px;
+                                    background: #2b1114;
+                                    border-width: 1px;
+                                    border-color: #ef444455;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        Text {
+                                            text: "Delete Character";
+                                            color: #ef4444;
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ==========================================
+    // MODAL OVERLAY 2: BOT CREATOR / EDITOR
+    // ==========================================
+    if root.show-bot-editor : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 100%;
+        height: 100%;
+        background: #000000aa;
+
+        TouchArea {
+            clicked => { root.show-bot-editor = false; }
+        }
+
+        VerticalLayout {
+            alignment: center;
+
+            HorizontalLayout {
+                alignment: center;
+
+                Rectangle {
+                    width: 500px;
+                    border-radius: 24px;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.border;
+
+                    VerticalLayout {
+                        padding: 24px;
+                        spacing: 14px;
+
+                        // Header
+                        HorizontalLayout {
+                            alignment: space-between;
+                            Text {
+                                text: root.bot-editor-is-edit ? "Edit Character" : "Create Character";
+                                color: Theme.text-primary;
+                                font-size: 17px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                            TouchArea {
+                                width: 32px;
+                                height: 32px;
+                                clicked => { root.show-bot-editor = false; }
+                                Rectangle {
+                                    border-radius: 16px;
+                                    background: parent.has-hover ? Theme.surface-high : transparent;
+                                    Text {
+                                        text: "✕";
+                                        color: Theme.text-secondary;
+                                        font-size: 14px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Form field: Name
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "Name *"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; }
+                            Rectangle {
+                                height: 40px;
+                                border-radius: 10px;
+                                background: Theme.surface-high;
+                                border-width: 1px;
+                                border-color: Theme.border;
+                                TextInput {
+                                    x: 12px;
+                                    width: parent.width - 24px;
+                                    text <=> root.bot-editor-name;
+                                    color: Theme.text-primary;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        // Form field: Bio (tagline)
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "Tagline / Short Bio"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; }
+                            Rectangle {
+                                height: 40px;
+                                border-radius: 10px;
+                                background: Theme.surface-high;
+                                border-width: 1px;
+                                border-color: Theme.border;
+                                TextInput {
+                                    x: 12px;
+                                    width: parent.width - 24px;
+                                    text <=> root.bot-editor-bio;
+                                    color: Theme.text-primary;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        // Form field: Description
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "Description (Personality / Background)"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; }
+                            Rectangle {
+                                height: 50px;
+                                border-radius: 10px;
+                                background: Theme.surface-high;
+                                border-width: 1px;
+                                border-color: Theme.border;
+                                TextInput {
+                                    x: 12px;
+                                    width: parent.width - 24px;
+                                    text <=> root.bot-editor-desc;
+                                    color: Theme.text-primary;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        // Form field: System Prompt
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "System Prompt (AI Persona Instructions) *"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; }
+                            Rectangle {
+                                height: 64px;
+                                border-radius: 10px;
+                                background: Theme.surface-high;
+                                border-width: 1px;
+                                border-color: Theme.border;
+                                TextInput {
+                                    x: 12px;
+                                    width: parent.width - 24px;
+                                    text <=> root.bot-editor-sys-prompt;
+                                    color: Theme.text-primary;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        // Action Buttons: Cancel & Save
+                        HorizontalLayout {
+                            spacing: 12px;
+                            padding-top: 8px;
+
+                            TouchArea {
+                                horizontal-stretch: 1;
+                                height: 42px;
+                                clicked => { root.show-bot-editor = false; }
+                                Rectangle {
+                                    border-radius: 21px;
+                                    background: Theme.surface-high;
+                                    border-width: 1px;
+                                    border-color: Theme.border;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        Text {
+                                            text: "Cancel";
+                                            color: Theme.text-secondary;
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+
+                            TouchArea {
+                                horizontal-stretch: 1;
+                                height: 42px;
+                                clicked => {
+                                    if (root.bot-editor-name != "") {
+                                        root.save-bot(
+                                            root.bot-editor-id,
+                                            root.bot-editor-is-edit,
+                                            root.bot-editor-name,
+                                            root.bot-editor-bio,
+                                            root.bot-editor-desc,
+                                            root.bot-editor-sys-prompt,
+                                            root.bot-editor-color-hex
+                                        );
+                                        root.show-bot-editor = false;
+                                    }
+                                }
+                                Rectangle {
+                                    border-radius: 21px;
+                                    background: root.bot-editor-name != "" ? root.user-accent-color : #1e2633;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        Text {
+                                            text: root.bot-editor-is-edit ? "Save Changes" : "Create Character";
+                                            color: root.bot-editor-name != "" ? #0b0f14 : Theme.text-subtle;
+                                            font-size: 13px;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ==========================================
+    // MODAL OVERLAY 3: PEER (USER) PROFILE
+    // ==========================================
+    if root.show-peer-profile : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 100%;
+        height: 100%;
+        background: #000000aa;
+
+        TouchArea {
+            clicked => { root.show-peer-profile = false; }
+        }
+
+        VerticalLayout {
+            alignment: center;
+
+            HorizontalLayout {
+                alignment: center;
+
+                Rectangle {
+                    width: 420px;
+                    border-radius: 24px;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.border;
+
+                    VerticalLayout {
+                        padding: 24px;
+                        spacing: 18px;
+
+                        // Header with close
+                        HorizontalLayout {
+                            alignment: space-between;
+                            Text {
+                                text: "User Profile";
+                                color: Theme.text-secondary;
+                                font-size: 13px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                            TouchArea {
+                                width: 32px;
+                                height: 32px;
+                                clicked => { root.show-peer-profile = false; }
+                                Rectangle {
+                                    border-radius: 16px;
+                                    background: parent.has-hover ? Theme.surface-high : transparent;
+                                    Text {
+                                        text: "✕";
+                                        color: Theme.text-secondary;
+                                        font-size: 14px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Avatar & Info
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 12px;
+
+                            Rectangle {
+                                width: 72px;
+                                height: 72px;
+                                border-radius: 36px;
+                                background: Theme.surface-high;
+                                border-width: 2px;
+                                border-color: Theme.border;
+                                clip: true;
+
+                                if root.peer-profile-has-avatar : Image {
+                                    source: root.peer-profile-avatar-image;
+                                    width: 72px;
+                                    height: 72px;
+                                    image-fit: cover;
+                                }
+
+                                if !root.peer-profile-has-avatar : Text {
+                                    text: root.peer-profile-avatar-letter;
+                                    color: Theme.text-primary;
+                                    font-size: 28px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            Text {
+                                text: "@" + root.peer-profile-username;
+                                color: Theme.text-primary;
+                                font-size: 20px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                            }
+
+                            Text {
+                                text: root.peer-profile-subtitle;
+                                color: Theme.text-secondary;
+                                font-size: 13px;
+                                horizontal-alignment: center;
+                            }
+                        }
+
+                        // Send Direct Message Button
+                        TouchArea {
+                            height: 44px;
+                            clicked => {
+                                root.show-peer-profile = false;
+                                root.peer-start-chat(root.peer-profile-id);
+                            }
+                            Rectangle {
+                                border-radius: 22px;
+                                background: root.user-accent-color;
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 8px;
+                                    Text {
+                                        text: "Send Message";
+                                        color: #0b0f14;
+                                        font-size: 14px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
                                     }
                                 }
                             }

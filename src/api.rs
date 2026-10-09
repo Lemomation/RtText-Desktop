@@ -246,26 +246,46 @@ impl SupabaseClient {
       padding: 40px;
       border-radius: 24px;
       text-align: center;
-      max-width: 400px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      max-width: 440px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
     }
-    h2 { margin: 0 0 12px; color: #FBBF24; font-size: 22px; }
-    p { margin: 0; color: #94A3B8; font-size: 14px; line-height: 1.5; }
-    .success { color: #34D399; font-weight: 600; margin-top: 16px; display: none; }
+    h2 { margin: 0 0 12px; color: #FBBF24; font-size: 24px; font-weight: 700; }
+    p { margin: 0; color: #94A3B8; font-size: 15px; line-height: 1.5; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 72px;
+      height: 72px;
+      border-radius: 36px;
+      font-size: 34px;
+      margin-bottom: 20px;
+      background: #064E3B;
+      color: #34D399;
+      border: 2px solid #059669;
+    }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div style="font-size: 44px; margin-bottom: 12px;">✨</div>
-    <h2>Authenticating with RtText</h2>
+  <div class="card" id="card">
+    <div id="icon" style="font-size: 48px; margin-bottom: 16px;">✨</div>
+    <h2 id="title">Authenticating with RtText</h2>
     <p id="msg">Completing Google Sign In...</p>
-    <div id="success" class="success">✓ Signed in successfully! You can close this tab and return to RtText.</div>
+    <div id="success" style="display: none;">
+      <div class="badge">✓</div>
+      <h2 style="color: #34D399; margin-bottom: 8px;">Logged in to RtText!</h2>
+      <p style="color: #E2E8F0; font-size: 15px;">You are now signed in. You can close this browser tab and return to the app.</p>
+    </div>
   </div>
   <script>
     function finish() {
+      document.getElementById('icon').style.display = 'none';
+      document.getElementById('title').style.display = 'none';
       document.getElementById('msg').style.display = 'none';
       document.getElementById('success').style.display = 'block';
-      setTimeout(function() { window.close(); }, 1200);
+      setTimeout(function() {
+        try { window.close(); } catch(e) {}
+      }, 1000);
     }
 
     if (window.location.hash) {
@@ -572,6 +592,7 @@ impl SupabaseClient {
                 bubble_color,
                 bot_id: c.bot_id,
                 dm_user_id: c.dm_user_id,
+                is_group: is_grp,
             });
         }
 
@@ -807,6 +828,151 @@ impl SupabaseClient {
             .into_iter()
             .next()
             .ok_or_else(|| "Failed to create DM conversation".into())
+    }
+
+    pub async fn fetch_group_members(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<DbGroupMember>, Box<dyn std::error::Error + Send + Sync>> {
+        let token = self.get_token().await;
+        let url = format!(
+            "{}/rest/v1/group_members_view?conversation_id=eq.{}&select=*&order=joined_at.asc",
+            CONFIG.supabase_url, conversation_id
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .headers(self.default_headers(token.as_deref()))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            return Ok(Vec::new());
+        }
+
+        let members: Vec<DbGroupMember> = resp.json().await.unwrap_or_default();
+        Ok(members)
+    }
+
+    pub async fn create_bot(
+        &self,
+        name: &str,
+        sys_prompt: &str,
+        bio: Option<&str>,
+        description: Option<&str>,
+        pfp_url: Option<&str>,
+        bubble_color: Option<&str>,
+    ) -> Result<DbBot, Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!("{}/rest/v1/bots", CONFIG.supabase_url);
+        let token = self.get_token().await;
+        let uid = self.get_user_id().await;
+
+        let body = serde_json::json!({
+            "owner": uid,
+            "name": name.trim(),
+            "sys_prompt": sys_prompt.trim(),
+            "bio": bio.map(|s| s.trim()),
+            "description": description.map(|s| s.trim()),
+            "pfp_url": pfp_url,
+            "bubble_color": bubble_color,
+            "is_public": true,
+        });
+
+        let mut headers = self.default_headers(token.as_deref());
+        headers.insert("Prefer", HeaderValue::from_static("return=representation"));
+
+        let resp = self
+            .http
+            .post(&url)
+            .headers(headers)
+            .json(&body)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(format!("Failed to create bot: {}", err_text).into());
+        }
+
+        let created: Vec<DbBot> = resp.json().await?;
+        created.into_iter().next().ok_or_else(|| "No bot returned".into())
+    }
+
+    pub async fn update_bot(
+        &self,
+        bot_id: &str,
+        name: &str,
+        sys_prompt: &str,
+        bio: Option<&str>,
+        description: Option<&str>,
+        bubble_color: Option<&str>,
+    ) -> Result<DbBot, Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!("{}/rest/v1/bots?id=eq.{}", CONFIG.supabase_url, bot_id);
+        let token = self.get_token().await;
+
+        let body = serde_json::json!({
+            "name": name.trim(),
+            "sys_prompt": sys_prompt.trim(),
+            "bio": bio.map(|s| s.trim()),
+            "description": description.map(|s| s.trim()),
+            "bubble_color": bubble_color,
+        });
+
+        let mut headers = self.default_headers(token.as_deref());
+        headers.insert("Prefer", HeaderValue::from_static("return=representation"));
+
+        let resp = self
+            .http
+            .patch(&url)
+            .headers(headers)
+            .json(&body)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(format!("Failed to update bot: {}", err_text).into());
+        }
+
+        let updated: Vec<DbBot> = resp.json().await?;
+        updated.into_iter().next().ok_or_else(|| "No bot returned".into())
+    }
+
+    pub async fn delete_bot(&self, bot_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!("{}/rest/v1/bots?id=eq.{}", CONFIG.supabase_url, bot_id);
+        let token = self.get_token().await;
+
+        let resp = self
+            .http
+            .delete(&url)
+            .headers(self.default_headers(token.as_deref()))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(format!("Failed to delete bot: {}", err_text).into());
+        }
+        Ok(())
+    }
+
+    pub async fn fetch_bot_by_id(&self, bot_id: &str) -> Result<Option<DbBot>, Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!("{}/rest/v1/bots?id=eq.{}&select=*", CONFIG.supabase_url, bot_id);
+        let token = self.get_token().await;
+
+        let resp = self
+            .http
+            .get(&url)
+            .headers(self.default_headers(token.as_deref()))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            return Ok(None);
+        }
+        let list: Vec<DbBot> = resp.json().await.unwrap_or_default();
+        Ok(list.into_iter().next())
     }
 
     pub async fn check_latest_github_release(&self) -> Result<GithubRelease, Box<dyn std::error::Error + Send + Sync>> {

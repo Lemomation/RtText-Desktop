@@ -127,6 +127,147 @@ fn register_custom_protocol() {
     }
 }
 
+async fn fetch_and_build_messages(
+    client: &SupabaseClient,
+    cid: &str,
+    my_uid: &str,
+    is_bot_chat: bool,
+    is_group: bool,
+    bot_bubble_color: slint::Color,
+    user_accent: slint::Color,
+) -> Vec<MessageItem> {
+    let msgs = match client.fetch_messages(cid).await {
+        Ok(m) => m,
+        Err(_) => return Vec::new(),
+    };
+
+    let group_members = if is_group {
+        client.fetch_group_members(cid).await.unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let mut items = Vec::new();
+    let mut prev_time: Option<chrono::DateTime<chrono::Local>> = None;
+
+    for (i, m) in msgs.iter().enumerate() {
+        let msg_time = m.created_at.as_deref().and_then(|t| {
+            chrono::DateTime::parse_from_rfc3339(t).ok().map(|dt| dt.with_timezone(&chrono::Local))
+        });
+
+        if let Some(curr) = msg_time {
+            let needs_sep = match prev_time {
+                None => true,
+                Some(p) => {
+                    if p.date_naive() != curr.date_naive() {
+                        true
+                    } else {
+                        (curr - p).num_minutes().abs() > 30
+                    }
+                }
+            };
+
+            if needs_sep {
+                let now = chrono::Local::now();
+                let today = now.date_naive();
+                let curr_date = curr.date_naive();
+                let yesterday = today - chrono::Duration::days(1);
+
+                let label = if curr_date == today {
+                    "Today".to_string()
+                } else if curr_date == yesterday {
+                    "Yesterday".to_string()
+                } else {
+                    curr.format("%b %-d, %-I:%M %p").to_string()
+                };
+
+                items.push(MessageItem {
+                    id: format!("sep_{}", m.id).into(),
+                    content: "".into(),
+                    timestamp: "".into(),
+                    is_me: false,
+                    bubble_color: slint::Color::from_argb_u8(0, 0, 0, 0),
+                    has_media: false,
+                    media_image: slint::Image::default(),
+                    show_sender: false,
+                    sender_name: "".into(),
+                    is_read: false,
+                    is_separator: true,
+                    separator_text: label.into(),
+                });
+            }
+            prev_time = Some(curr);
+        }
+
+        let is_me = m.role == "user" && (m.sender_id.as_deref() == Some(my_uid) || m.sender_id.is_none());
+
+        let is_read = if is_me {
+            if is_bot_chat {
+                i < msgs.len() - 1
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        let (show_sender, sender_name) = if is_group && !is_me {
+            let name = if let Some(bid) = m.bot_id.as_deref() {
+                group_members
+                    .iter()
+                    .find(|gm| gm.bot_id.as_deref() == Some(bid))
+                    .and_then(|gm| gm.name.clone())
+                    .unwrap_or_else(|| "Bot".to_string())
+            } else if let Some(sid) = m.sender_id.as_deref() {
+                group_members
+                    .iter()
+                    .find(|gm| gm.user_id.as_deref() == Some(sid))
+                    .and_then(|gm| gm.name.clone())
+                    .unwrap_or_else(|| "Member".to_string())
+            } else {
+                "Member".to_string()
+            };
+            (true, name)
+        } else {
+            (false, String::new())
+        };
+
+        let mut media_img = None;
+        if let Some(murl) = m.media_url.as_deref() {
+            if let Some(bytes) = client.fetch_and_cache_image(murl).await {
+                media_img = decode_image_rgba(&bytes);
+            }
+        }
+
+        let has_media = media_img.is_some();
+        let img = media_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+        let bubble = if is_me {
+            user_accent
+        } else if is_bot_chat {
+            bot_bubble_color
+        } else {
+            parse_hex_color("#1E2530")
+        };
+
+        items.push(MessageItem {
+            id: m.id.into(),
+            content: m.content.unwrap_or_default().into(),
+            timestamp: format_bubble_time(m.created_at.as_deref().unwrap_or("")).into(),
+            is_me,
+            bubble_color: bubble,
+            has_media,
+            media_image: img,
+            show_sender,
+            sender_name: sender_name.into(),
+            is_read,
+            is_separator: false,
+            separator_text: "".into(),
+        });
+    }
+
+    items
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("RtText Desktop initializing, backend: {}", config::CONFIG.supabase_url);
 
@@ -172,6 +313,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bot_to_conv: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
     let conv_to_dm: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
     let dm_to_conv: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
+    let conv_is_group: Arc<RwLock<HashMap<String, bool>>> = Arc::new(RwLock::new(HashMap::new()));
 
     // Restore saved accent if available
     if let Some((acc_id, acc_hex)) = load_saved_accent() {
@@ -219,6 +361,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let bot_to_conv_clone = bot_to_conv.clone();
         let conv_to_dm_clone = conv_to_dm.clone();
         let dm_to_conv_clone = dm_to_conv.clone();
+        let conv_is_group_clone = conv_is_group.clone();
 
         Arc::new(move |uid: String| {
             let client = client.clone();
@@ -229,6 +372,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let bot_to_conv = bot_to_conv_clone.clone();
             let conv_to_dm = conv_to_dm_clone.clone();
             let dm_to_conv = dm_to_conv_clone.clone();
+            let conv_is_group = conv_is_group_clone.clone();
 
             tokio::spawn(async move {
                 // 1. Profile & Avatar
@@ -268,8 +412,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         bot_items.push(RawBotCard {
                             id: b.id,
+                            owner: b.owner,
                             name: b.name.clone(),
                             bio: b.bio.unwrap_or_default(),
+                            description: b.description.unwrap_or_default(),
+                            sys_prompt: b.sys_prompt.unwrap_or_default(),
                             avatar_letter: b.name.chars().next().unwrap_or('B').to_uppercase().to_string(),
                             avatar_img,
                             bubble_color: b.bubble_color.unwrap_or_else(|| "#FB7185".into()),
@@ -357,6 +504,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let mut b2c = bot_to_conv.write().await;
                         let mut c2d = conv_to_dm.write().await;
                         let mut d2c = dm_to_conv.write().await;
+                        let mut c2g = conv_is_group.write().await;
                         for c in &convs {
                             c2b.insert(c.id.clone(), c.bot_id.clone());
                             if let Some(bid) = &c.bot_id {
@@ -366,6 +514,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 c2d.insert(c.id.clone(), dmid.clone());
                                 d2c.insert(dmid.clone(), c.id.clone());
                             }
+                            c2g.insert(c.id.clone(), c.is_group);
                         }
                     }
 
@@ -460,65 +609,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // 5. Load Messages for Active Conversation
                     let cur_cid = active_id.read().await.clone();
                     if !cur_cid.is_empty() {
-                        if let Ok(msgs) = client.fetch_messages(&cur_cid).await {
-                            let mut msg_items = Vec::new();
-                            for m in msgs {
-                                let is_me = m.role == "user"
-                                    && (m.sender_id.as_deref() == Some(&uid) || m.sender_id.is_none());
+                        let is_bot = active_bot.read().await.is_some();
+                        let (user_accent, bot_color) = if let Some(w) = window_weak.upgrade() {
+                            (w.get_user_accent_color(), w.get_active_chat_bubble_color())
+                        } else {
+                            (parse_hex_color("#F59E0B"), parse_hex_color("#FB7185"))
+                        };
 
-                                let mut media_img = None;
-                                if let Some(murl) = m.media_url.as_deref() {
-                                    if let Some(bytes) = client.fetch_and_cache_image(murl).await {
-                                        media_img = decode_image_rgba(&bytes);
-                                    }
-                                }
-
-                                msg_items.push(RawMsgItem {
-                                    id: m.id,
-                                    content: m.content.unwrap_or_default(),
-                                    timestamp: format_bubble_time(m.created_at.as_deref().unwrap_or("")),
-                                    is_me,
-                                    media_img,
-                                });
+                        let is_grp = conv_is_group.read().await.get(&cur_cid).copied().unwrap_or(false);
+                        let items = fetch_and_build_messages(&client, &cur_cid, &uid, is_bot, is_grp, bot_color, user_accent).await;
+                        let w_clone = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w_clone.upgrade() {
+                                let model = std::rc::Rc::new(slint::VecModel::from(items));
+                                w.set_messages(model.into());
+                                w.set_chat_viewport_y(-100000.0);
                             }
-
-                            let w_clone = window_weak.clone();
-                            let _ = slint::invoke_from_event_loop(move || {
-                                if let Some(w) = w_clone.upgrade() {
-                                    let user_accent = w.get_user_accent_color();
-                                    let is_bot = w.get_active_chat_is_bot();
-                                    let bot_color = w.get_active_chat_bubble_color();
-
-                                    let items: Vec<MessageItem> = msg_items
-                                        .into_iter()
-                                        .map(|item| {
-                                            let has_media = item.media_img.is_some();
-                                            let img = item.media_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
-                                            let bubble = if item.is_me {
-                                                user_accent
-                                            } else if is_bot {
-                                                bot_color
-                                            } else {
-                                                parse_hex_color("#1E2530")
-                                            };
-
-                                            MessageItem {
-                                                id: item.id.into(),
-                                                content: item.content.into(),
-                                                timestamp: item.timestamp.into(),
-                                                is_me: item.is_me,
-                                                bubble_color: bubble,
-                                                has_media,
-                                                media_image: img,
-                                            }
-                                        })
-                                        .collect();
-
-                                    let model = std::rc::Rc::new(slint::VecModel::from(items));
-                                    w.set_messages(model.into());
-                                }
-                            });
-                        }
+                        });
                     }
                 }
             });
@@ -805,37 +912,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     });
 
                     // Fetch messages for this DM
-                    if let Ok(msgs) = client.fetch_messages(&conv.id).await {
-                        let w_clone = window_weak.clone();
-                        let user_id_copy = uid.clone();
-
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(w) = w_clone.upgrade() {
-                                let user_accent = w.get_user_accent_color();
-                                let items: Vec<MessageItem> = msgs
-                                    .into_iter()
-                                    .map(|m| {
-                                        let is_me = m.role == "user"
-                                            && (m.sender_id.as_deref() == Some(&user_id_copy) || m.sender_id.is_none());
-                                        let bubble = if is_me { user_accent } else { parse_hex_color("#1E2530") };
-
-                                        MessageItem {
-                                            id: m.id.into(),
-                                            content: m.content.unwrap_or_default().into(),
-                                            timestamp: format_bubble_time(m.created_at.as_deref().unwrap_or("")).into(),
-                                            is_me,
-                                            bubble_color: bubble,
-                                            has_media: false,
-                                            media_image: slint::Image::default(),
-                                        }
-                                    })
-                                    .collect();
-
-                                let model = std::rc::Rc::new(slint::VecModel::from(items));
-                                w.set_messages(model.into());
-                            }
-                        });
-                    }
+                    let user_accent = if let Some(w) = window_weak.upgrade() { w.get_user_accent_color() } else { parse_hex_color("#F59E0B") };
+                    let items = fetch_and_build_messages(&client, &conv.id, &uid, false, false, parse_hex_color("#1E2530"), user_accent).await;
+                    let w_clone = window_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = w_clone.upgrade() {
+                            let model = std::rc::Rc::new(slint::VecModel::from(items));
+                            w.set_messages(model.into());
+                            w.set_chat_viewport_y(-100000.0);
+                        }
+                    });
                 }
             });
         });
@@ -941,10 +1027,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     bubble_color: user_accent,
                                     has_media: true,
                                     media_image: img,
+                                    show_sender: false,
+                                    sender_name: "".into(),
+                                    is_read: false,
+                                    is_separator: false,
+                                    separator_text: "".into(),
                                 });
 
                                 let model = std::rc::Rc::new(slint::VecModel::from(msgs));
                                 w.set_messages(model.into());
+                                w.set_chat_viewport_y(-100000.0);
                             }
                         });
 
@@ -967,6 +1059,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let my_uid = my_user_id.clone();
         let conv_to_bot = conv_to_bot.clone();
         let bot_to_conv = bot_to_conv.clone();
+        let conv_is_group = conv_is_group.clone();
 
         main_window.on_conversation_selected(move |id, title, subtitle, _avatar, is_bot, color| {
             let client = client.clone();
@@ -976,6 +1069,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let my_uid = my_uid.clone();
             let conv_to_bot = conv_to_bot.clone();
             let bot_to_conv = bot_to_conv.clone();
+            let conv_is_group = conv_is_group.clone();
             let sel_id = id.to_string();
             let bot_bubble_color = color;
             let is_bot_chat = is_bot;
@@ -1011,63 +1105,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 *active_id.write().await = cid.clone();
                 *active_bot.write().await = bid;
 
-                if let Ok(msgs) = client.fetch_messages(&cid).await {
-                    let mut msg_items = Vec::new();
-                    for m in msgs {
-                        let is_me = m.role == "user"
-                            && (m.sender_id.as_deref() == Some(&uid) || m.sender_id.is_none());
+                let user_accent = if let Some(w) = window_weak.upgrade() {
+                    w.get_user_accent_color()
+                } else {
+                    parse_hex_color("#F59E0B")
+                };
 
-                        let mut media_img = None;
-                        if let Some(murl) = m.media_url.as_deref() {
-                            if let Some(bytes) = client.fetch_and_cache_image(murl).await {
-                                media_img = decode_image_rgba(&bytes);
-                            }
-                        }
-
-                        msg_items.push(RawMsgItem {
-                            id: m.id,
-                            content: m.content.unwrap_or_default(),
-                            timestamp: format_bubble_time(m.created_at.as_deref().unwrap_or("")),
-                            is_me,
-                            media_img,
-                        });
+                let is_grp = conv_is_group.read().await.get(&cid).copied().unwrap_or(false);
+                let items = fetch_and_build_messages(&client, &cid, &uid, is_bot_chat, is_grp, bot_bubble_color, user_accent).await;
+                let w_clone = window_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = w_clone.upgrade() {
+                        let model = std::rc::Rc::new(slint::VecModel::from(items));
+                        w.set_messages(model.into());
+                        w.set_chat_viewport_y(-100000.0);
                     }
-
-                    let w_clone = window_weak.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(w) = w_clone.upgrade() {
-                            let user_accent = w.get_user_accent_color();
-
-                            let items: Vec<MessageItem> = msg_items
-                                .into_iter()
-                                .map(|item| {
-                                    let bubble = if item.is_me {
-                                        user_accent
-                                    } else if is_bot_chat {
-                                        bot_bubble_color
-                                    } else {
-                                        parse_hex_color("#1E2530")
-                                    };
-                                    let has_media = item.media_img.is_some();
-                                    let img = item.media_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
-
-                                    MessageItem {
-                                        id: item.id.into(),
-                                        content: item.content.into(),
-                                        timestamp: item.timestamp.into(),
-                                        is_me: item.is_me,
-                                        bubble_color: bubble,
-                                        has_media,
-                                        media_image: img,
-                                    }
-                                })
-                                .collect();
-
-                            let model = std::rc::Rc::new(slint::VecModel::from(items));
-                            w.set_messages(model.into());
-                        }
-                    });
-                }
+                });
             });
         });
     }
@@ -1095,9 +1148,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     bubble_color: user_accent,
                     has_media: false,
                     media_image: slint::Image::default(),
+                    show_sender: false,
+                    sender_name: "".into(),
+                    is_read: false,
+                    is_separator: false,
+                    separator_text: "".into(),
                 });
                 let model = std::rc::Rc::new(slint::VecModel::from(msgs));
                 w.set_messages(model.into());
+                w.set_chat_viewport_y(-100000.0);
             }
 
             let client = client.clone();
@@ -1137,9 +1196,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             bubble_color: bot_bubble,
                                             has_media: false,
                                             media_image: slint::Image::default(),
+                                            show_sender: false,
+                                            sender_name: "".into(),
+                                            is_read: false,
+                                            is_separator: false,
+                                            separator_text: "".into(),
                                         });
                                         let model = std::rc::Rc::new(slint::VecModel::from(msgs));
                                         w.set_messages(model.into());
+                                        w.set_chat_viewport_y(-100000.0);
 
                                         if let Some(beads) = reply.beads {
                                             w.set_bead_balance(beads);
@@ -1169,15 +1234,409 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         bubble_color: parse_hex_color("#EF4444"),
                                         has_media: false,
                                         media_image: slint::Image::default(),
+                                        show_sender: false,
+                                        sender_name: "".into(),
+                                        is_read: false,
+                                        is_separator: false,
+                                        separator_text: "".into(),
                                     });
                                     let model = std::rc::Rc::new(slint::VecModel::from(msgs));
                                     w.set_messages(model.into());
+                                    w.set_chat_viewport_y(-100000.0);
                                 }
                             });
                         }
                     }
                 }
             });
+        });
+    }
+
+    // BOT PROFILE & BOT EDITOR CALLBACKS
+    {
+        let client = client.clone();
+        let window_weak = main_window.as_weak();
+        let my_uid = my_user_id.clone();
+
+        main_window.on_open_bot_profile(move |bot_id| {
+            let client = client.clone();
+            let window_weak = window_weak.clone();
+            let my_uid = my_uid.clone();
+            let bid = bot_id.to_string();
+
+            tokio::spawn(async move {
+                let uid = my_uid.read().await.clone();
+                if let Ok(Some(bot)) = client.fetch_bot_by_id(&bid).await {
+                    let is_owner = bot.owner.as_deref() == Some(&uid);
+                    let mut avatar_img = None;
+                    if let Some(pfp) = bot.pfp_url.as_deref() {
+                        if let Some(bytes) = client.fetch_and_cache_image(pfp).await {
+                            avatar_img = decode_image_rgba(&bytes);
+                        }
+                    }
+                    let has_avatar = avatar_img.is_some();
+                    let img = avatar_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+                    let letter = bot.name.chars().next().unwrap_or('B').to_uppercase().to_string();
+                    let b_color = parse_hex_color(&bot.bubble_color.unwrap_or_else(|| "#FB7185".into()));
+
+                    let w_clone = window_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = w_clone.upgrade() {
+                            w.set_bot_profile_id(bot.id.into());
+                            w.set_bot_profile_name(bot.name.into());
+                            w.set_bot_profile_bio(bot.bio.unwrap_or_default().into());
+                            w.set_bot_profile_desc(bot.description.unwrap_or_default().into());
+                            w.set_bot_profile_avatar_letter(letter.into());
+                            w.set_bot_profile_has_avatar(has_avatar);
+                            w.set_bot_profile_avatar_image(img);
+                            w.set_bot_profile_bubble_color(b_color);
+                            w.set_bot_profile_is_owner(is_owner);
+                            w.set_show_bot_profile(true);
+                        }
+                    });
+                }
+            });
+        });
+    }
+
+    {
+        let client = client.clone();
+        let window_weak = main_window.as_weak();
+
+        main_window.on_open_bot_editor(move |id, is_edit, name, bio, desc, prompt, color| {
+            let client = client.clone();
+            let window_weak = window_weak.clone();
+            let bot_id = id.to_string();
+            let e_name = name.to_string();
+            let e_bio = bio.to_string();
+            let e_desc = desc.to_string();
+            let e_prompt = prompt.to_string();
+            let e_color = color.to_string();
+
+            tokio::spawn(async move {
+                let final_prompt = if is_edit && e_prompt.is_empty() && !bot_id.is_empty() {
+                    client.fetch_bot_by_id(&bot_id).await.ok().flatten().and_then(|b| b.sys_prompt).unwrap_or_default()
+                } else {
+                    e_prompt
+                };
+
+                let w_clone = window_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = w_clone.upgrade() {
+                        w.set_bot_editor_id(bot_id.into());
+                        w.set_bot_editor_is_edit(is_edit);
+                        w.set_bot_editor_name(e_name.into());
+                        w.set_bot_editor_bio(e_bio.into());
+                        w.set_bot_editor_desc(e_desc.into());
+                        w.set_bot_editor_sys_prompt(final_prompt.into());
+                        w.set_bot_editor_color_hex(e_color.into());
+                        w.set_show_bot_editor(true);
+                    }
+                });
+            });
+        });
+    }
+
+    {
+        let client = client.clone();
+        let my_uid = my_user_id.clone();
+        let load_fn = load_app_data.clone();
+
+        main_window.on_save_bot(move |id, is_edit, name, bio, desc, prompt, color| {
+            let client = client.clone();
+            let my_uid = my_uid.clone();
+            let load_fn = load_fn.clone();
+            let bot_id = id.to_string();
+            let b_name = name.to_string();
+            let b_bio = if bio.is_empty() { None } else { Some(bio.to_string()) };
+            let b_desc = if desc.is_empty() { None } else { Some(desc.to_string()) };
+            let b_prompt = prompt.to_string();
+            let b_color = if color.is_empty() { None } else { Some(color.to_string()) };
+
+            tokio::spawn(async move {
+                let res = if is_edit {
+                    client.update_bot(
+                        &bot_id,
+                        &b_name,
+                        &b_prompt,
+                        b_bio.as_deref(),
+                        b_desc.as_deref(),
+                        b_color.as_deref(),
+                    ).await
+                } else {
+                    client.create_bot(
+                        &b_name,
+                        &b_prompt,
+                        b_bio.as_deref(),
+                        b_desc.as_deref(),
+                        None,
+                        b_color.as_deref(),
+                    ).await
+                };
+
+                if res.is_ok() {
+                    let uid = my_uid.read().await.clone();
+                    load_fn(uid);
+                }
+            });
+        });
+    }
+
+    {
+        let client = client.clone();
+        let my_uid = my_user_id.clone();
+        let load_fn = load_app_data.clone();
+
+        main_window.on_delete_bot(move |id| {
+            let client = client.clone();
+            let my_uid = my_uid.clone();
+            let load_fn = load_fn.clone();
+            let bot_id = id.to_string();
+
+            tokio::spawn(async move {
+                if client.delete_bot(&bot_id).await.is_ok() {
+                    let uid = my_uid.read().await.clone();
+                    load_fn(uid);
+                }
+            });
+        });
+    }
+
+    {
+        let client = client.clone();
+        let window_weak = main_window.as_weak();
+        let active_id = active_conv_id.clone();
+        let active_bot = active_bot_id.clone();
+        let my_uid = my_user_id.clone();
+        let bot_to_conv = bot_to_conv.clone();
+        let conv_to_bot = conv_to_bot.clone();
+
+        main_window.on_bot_start_chat(move |bot_id| {
+            let client = client.clone();
+            let window_weak = window_weak.clone();
+            let active_id = active_id.clone();
+            let active_bot = active_bot.clone();
+            let my_uid = my_uid.clone();
+            let bot_to_conv = bot_to_conv.clone();
+            let conv_to_bot = conv_to_bot.clone();
+            let bid = bot_id.to_string();
+
+            tokio::spawn(async move {
+                let uid = my_uid.read().await.clone();
+                if uid.is_empty() { return; }
+
+                if let Ok(c) = client.get_or_create_bot_conversation(&uid, &bid).await {
+                    let cid = c.id.clone();
+                    *active_id.write().await = cid.clone();
+                    *active_bot.write().await = Some(bid.clone());
+                    bot_to_conv.write().await.insert(bid.clone(), cid.clone());
+                    conv_to_bot.write().await.insert(cid.clone(), Some(bid.clone()));
+
+                    let (b_name, b_bio, b_letter, b_has_avatar, b_avatar, b_color) = if let Ok(Some(b)) = client.fetch_bot_by_id(&bid).await {
+                        let mut avatar_img = None;
+                        if let Some(pfp) = b.pfp_url.as_deref() {
+                            if let Some(bytes) = client.fetch_and_cache_image(pfp).await {
+                                avatar_img = decode_image_rgba(&bytes);
+                            }
+                        }
+                        let has_a = avatar_img.is_some();
+                        let a_img = avatar_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+                        let l = b.name.chars().next().unwrap_or('B').to_uppercase().to_string();
+                        let col = parse_hex_color(&b.bubble_color.unwrap_or_else(|| "#FB7185".into()));
+                        (b.name, b.bio.unwrap_or_default(), l, has_a, a_img, col)
+                    } else {
+                        ("Bot".into(), "".into(), "B".into(), false, slint::Image::default(), parse_hex_color("#FB7185"))
+                    };
+
+                    let w_clone = window_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = w_clone.upgrade() {
+                            w.set_active_chat_id(cid.clone().into());
+                            w.set_active_chat_title(b_name.into());
+                            w.set_active_chat_subtitle(b_bio.into());
+                            w.set_active_chat_avatar(b_letter.into());
+                            w.set_active_chat_has_avatar(b_has_avatar);
+                            w.set_active_chat_avatar_image(b_avatar);
+                            w.set_active_chat_is_bot(true);
+                            w.set_active_chat_bubble_color(b_color);
+                            w.set_active_nav("chats".into());
+                        }
+                    });
+
+                    // Load messages & scroll to bottom
+                    let items = fetch_and_build_messages(&client, &c.id, &uid, true, false, b_color, parse_hex_color("#F59E0B")).await;
+                    let w_clone = window_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = w_clone.upgrade() {
+                            let model = std::rc::Rc::new(slint::VecModel::from(items));
+                            w.set_messages(model.into());
+                            w.set_chat_viewport_y(-100000.0);
+                        }
+                    });
+                }
+            });
+        });
+    }
+
+    // PEER PROFILE CALLBACKS
+    {
+        let client = client.clone();
+        let window_weak = main_window.as_weak();
+
+        main_window.on_open_peer_profile(move |peer_id, username| {
+            let client = client.clone();
+            let window_weak = window_weak.clone();
+            let pid = peer_id.to_string();
+            let uname = username.to_string();
+
+            tokio::spawn(async move {
+                let (has_avatar, avatar_img, subtitle) = if let Ok(profile) = client.fetch_profile(&pid).await {
+                    let mut a_img = None;
+                    if let Some(a_url) = profile.avatar_url.as_deref() {
+                        if let Some(bytes) = client.fetch_and_cache_image(a_url).await {
+                            a_img = decode_image_rgba(&bytes);
+                        }
+                    }
+                    let has_a = a_img.is_some();
+                    let img = a_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+                    (has_a, img, "Member of RtText".to_string())
+                } else {
+                    (false, slint::Image::default(), "Member of RtText".to_string())
+                };
+
+                let letter = uname.chars().next().unwrap_or('U').to_uppercase().to_string();
+                let w_clone = window_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = w_clone.upgrade() {
+                        w.set_peer_profile_id(pid.into());
+                        w.set_peer_profile_username(uname.into());
+                        w.set_peer_profile_subtitle(subtitle.into());
+                        w.set_peer_profile_avatar_letter(letter.into());
+                        w.set_peer_profile_has_avatar(has_avatar);
+                        w.set_peer_profile_avatar_image(avatar_img);
+                        w.set_show_peer_profile(true);
+                    }
+                });
+            });
+        });
+    }
+
+    {
+        let client = client.clone();
+        let window_weak = main_window.as_weak();
+        let active_id = active_conv_id.clone();
+        let active_bot = active_bot_id.clone();
+        let my_uid = my_user_id.clone();
+        let dm_to_conv = dm_to_conv.clone();
+        let conv_to_dm = conv_to_dm.clone();
+
+        main_window.on_peer_start_chat(move |peer_id| {
+            let client = client.clone();
+            let window_weak = window_weak.clone();
+            let active_id = active_id.clone();
+            let active_bot = active_bot.clone();
+            let my_uid = my_uid.clone();
+            let dm_to_conv = dm_to_conv.clone();
+            let conv_to_dm = conv_to_dm.clone();
+            let pid = peer_id.to_string();
+
+            tokio::spawn(async move {
+                let uid = my_uid.read().await.clone();
+                if uid.is_empty() { return; }
+
+                if let Ok(c) = client.get_or_create_dm_conversation(&uid, &pid).await {
+                    let cid = c.id.clone();
+                    *active_id.write().await = cid.clone();
+                    *active_bot.write().await = None;
+                    dm_to_conv.write().await.insert(pid.clone(), cid.clone());
+                    conv_to_dm.write().await.insert(cid.clone(), pid.clone());
+
+                    let (uname, letter, has_avatar, avatar_img) = if let Ok(profile) = client.fetch_profile(&pid).await {
+                        let mut a_img = None;
+                        if let Some(a_url) = profile.avatar_url.as_deref() {
+                            if let Some(bytes) = client.fetch_and_cache_image(a_url).await {
+                                a_img = decode_image_rgba(&bytes);
+                            }
+                        }
+                        let u = profile.username.unwrap_or_else(|| "User".into());
+                        let l = u.chars().next().unwrap_or('U').to_uppercase().to_string();
+                        let has_a = a_img.is_some();
+                        let img = a_img.as_ref().map(|d| d.to_slint_image()).unwrap_or_default();
+                        (u, l, has_a, img)
+                    } else {
+                        ("User".into(), "U".into(), false, slint::Image::default())
+                    };
+
+                    let w_clone = window_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = w_clone.upgrade() {
+                            w.set_active_chat_id(cid.clone().into());
+                            w.set_active_chat_title(uname.into());
+                            w.set_active_chat_subtitle("Direct message".into());
+                            w.set_active_chat_avatar(letter.into());
+                            w.set_active_chat_has_avatar(has_avatar);
+                            w.set_active_chat_avatar_image(avatar_img);
+                            w.set_active_chat_is_bot(false);
+                            w.set_active_chat_bubble_color(parse_hex_color("#1E2530"));
+                            w.set_active_nav("chats".into());
+                        }
+                    });
+
+                    // Load messages & scroll to bottom
+                    let items = fetch_and_build_messages(&client, &c.id, &uid, false, false, parse_hex_color("#1E2530"), parse_hex_color("#F59E0B")).await;
+                    let w_clone = window_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = w_clone.upgrade() {
+                            let model = std::rc::Rc::new(slint::VecModel::from(items));
+                            w.set_messages(model.into());
+                            w.set_chat_viewport_y(-100000.0);
+                        }
+                    });
+                }
+            });
+        });
+    }
+
+    // HEADER PROFILE CLICKED CALLBACK
+    {
+        let window_weak = main_window.as_weak();
+
+        main_window.on_header_profile_clicked(move || {
+            if let Some(w) = window_weak.upgrade() {
+                if w.get_active_chat_is_bot() {
+                    let bot_id = w.get_active_chat_id().to_string();
+                    let title = w.get_active_chat_title().to_string();
+                    let subtitle = w.get_active_chat_subtitle().to_string();
+                    let letter = w.get_active_chat_avatar().to_string();
+                    let has_avatar = w.get_active_chat_has_avatar();
+                    let img = w.get_active_chat_avatar_image();
+                    let col = w.get_active_chat_bubble_color();
+
+                    w.set_bot_profile_id(bot_id.into());
+                    w.set_bot_profile_name(title.into());
+                    w.set_bot_profile_bio(subtitle.into());
+                    w.set_bot_profile_desc("".into());
+                    w.set_bot_profile_avatar_letter(letter.into());
+                    w.set_bot_profile_has_avatar(has_avatar);
+                    w.set_bot_profile_avatar_image(img);
+                    w.set_bot_profile_bubble_color(col);
+                    w.set_bot_profile_is_owner(false);
+                    w.set_show_bot_profile(true);
+                } else {
+                    let title = w.get_active_chat_title().to_string();
+                    let letter = w.get_active_chat_avatar().to_string();
+                    let has_avatar = w.get_active_chat_has_avatar();
+                    let img = w.get_active_chat_avatar_image();
+
+                    w.set_peer_profile_id(w.get_active_chat_id().clone());
+                    w.set_peer_profile_username(title.into());
+                    w.set_peer_profile_subtitle("Member of RtText".into());
+                    w.set_peer_profile_avatar_letter(letter.into());
+                    w.set_peer_profile_has_avatar(has_avatar);
+                    w.set_peer_profile_avatar_image(img);
+                    w.set_show_peer_profile(true);
+                }
+            }
         });
     }
 
@@ -1199,6 +1658,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sync_client = client.clone();
     let sync_active_id = active_conv_id.clone();
     let sync_my_uid = my_user_id.clone();
+    let sync_conv_is_group = conv_is_group.clone();
     let mut poll_count: u32 = 0;
 
     timer.start(
@@ -1219,6 +1679,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let active_id = sync_active_id.clone();
                 let my_uid = sync_my_uid.clone();
                 let w_clone = window_for_tray.clone();
+                let conv_is_group = sync_conv_is_group.clone();
 
                 tokio::spawn(async move {
                     let cid = active_id.read().await.clone();
@@ -1226,48 +1687,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     if !cid.is_empty() && !uid.is_empty() {
                         if let Ok(msgs) = client.fetch_messages(&cid).await {
-                            let _ = slint::invoke_from_event_loop(move || {
-                                if let Some(w) = w_clone.upgrade() {
-                                    let current_count = w.get_messages().row_count();
-                                    if msgs.len() > current_count {
-                                        let user_accent = w.get_user_accent_color();
-                                        let is_bot = w.get_active_chat_is_bot();
-                                        let bot_color = w.get_active_chat_bubble_color();
+                            let (user_accent, is_bot, bot_color) = if let Some(w) = w_clone.upgrade() {
+                                (
+                                    w.get_user_accent_color(),
+                                    w.get_active_chat_is_bot(),
+                                    w.get_active_chat_bubble_color(),
+                                )
+                            } else {
+                                return;
+                            };
 
-                                        let items: Vec<MessageItem> = msgs
-                                            .into_iter()
-                                            .map(|m| {
-                                                let is_me = m.role == "user"
-                                                    && (m.sender_id.as_deref() == Some(&uid)
-                                                        || m.sender_id.is_none());
-                                                let bubble = if is_me {
-                                                    user_accent
-                                                } else if is_bot {
-                                                    bot_color
-                                                } else {
-                                                    parse_hex_color("#1E2530")
-                                                };
+                            let is_group = conv_is_group.read().await.get(&cid).copied().unwrap_or(false);
 
-                                                MessageItem {
-                                                    id: m.id.into(),
-                                                    content: m.content.unwrap_or_default().into(),
-                                                    timestamp: format_bubble_time(
-                                                        m.created_at.as_deref().unwrap_or(""),
-                                                    )
-                                                    .into(),
-                                                    is_me,
-                                                    bubble_color: bubble,
-                                                    has_media: false,
-                                                    media_image: slint::Image::default(),
-                                                }
-                                            })
-                                            .collect();
-
-                                        let model = std::rc::Rc::new(slint::VecModel::from(items));
-                                        w.set_messages(model.into());
+                            if let Some(latest) = msgs.last() {
+                                let has_latest = if let Some(w) = w_clone.upgrade() {
+                                    let model = w.get_messages();
+                                    let n = model.row_count();
+                                    if n > 0 {
+                                        model.row_data(n - 1).map(|m| m.id.as_str() == latest.id.as_str()).unwrap_or(false)
+                                    } else {
+                                        false
                                     }
+                                } else {
+                                    true
+                                };
+
+                                if !has_latest {
+                                    let items = fetch_and_build_messages(
+                                        &client,
+                                        &cid,
+                                        &uid,
+                                        is_bot,
+                                        is_group,
+                                        bot_color,
+                                        user_accent,
+                                    ).await;
+
+                                    let _ = slint::invoke_from_event_loop(move || {
+                                        if let Some(w) = w_clone.upgrade() {
+                                            let model = std::rc::Rc::new(slint::VecModel::from(items));
+                                            w.set_messages(model.into());
+                                            w.set_chat_viewport_y(-100000.0);
+                                        }
+                                    });
                                 }
-                            });
+                            }
                         }
                     }
                 });
